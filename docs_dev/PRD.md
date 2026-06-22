@@ -1,8 +1,8 @@
 # PRD — ReturnSuccessOrError (.NET)
 
 **Produto:** Biblioteca NuGet `ReturnSuccessOrError`
-**Plataforma-alvo:** .NET 9 / C# 13 (com suporte a `netstandard2.1` em avaliação)
-**Tipo:** Biblioteca de domínio (class library), sem dependências de runtime de terceiros
+**Plataforma-alvo:** .NET 10 (LTS) / C# 14 (com suporte a `netstandard2.1` em avaliação)
+**Tipo:** Biblioteca de domínio (class library), zero dependências de runtime
 **Licença:** MIT
 **Data:** 2026-06-22
 
@@ -40,7 +40,7 @@ A biblioteca substitui o padrão de `try/catch` espalhado por um fluxo previsív
 5. **Integração idiomática com o ecossistema .NET** — suporte a `CancellationToken`, compatível com injeção de dependência (`Microsoft.Extensions.DependencyInjection`) e ASP.NET Core.
 6. **Tipagem forte ponta a ponta** — parâmetros, dado bruto da fonte, valor de sucesso e erro são todos genéricos e verificados em compilação.
 7. **Imutabilidade por padrão** — erros e parâmetros são `record`s imutáveis; enriquecimento via expressão `with`.
-8. **Zero dependências de runtime** — usa apenas a BCL (`System.*`); não acopla o consumidor a nenhum framework.
+8. **Zero dependências de runtime** — usa apenas a BCL (`System.*`); não acopla o consumidor a nenhum framework nem a um container de DI específico (a composição de features é convenção documentada, não tipo embarcado).
 9. **Observabilidade opt-in** — medição de tempo de execução habilitável por instância, sem custo quando desligada.
 
 ### 2.3 Não-objetivos
@@ -76,12 +76,15 @@ Desenvolvedores .NET (back-end com ASP.NET Core, serviços, workers, ou apps MAU
 - Execução opcional do processamento em thread pool (`Task.Run`).
 - Tipos auxiliares `Unit` (ausência de valor) e `Nil` (null semântico).
 - Medição opcional de tempo de execução.
+- Contrato marcador para serviços de feature (Service Layer) — `IFeatureService` (interface vazia, zero dependência).
+- **Metodologia de composição de features** (estrutura de pastas + padrão Module/Service) entregue como **convenção documentada** — ver seção 5.10.
 
 ### 4.2 Fora do Escopo
 
 - Geração de código / source generators (avaliado para versão futura).
 - Conversões implícitas avançadas (avaliado, opt-in futuro).
 - Integração com bibliotecas de validação (`FluentValidation`) — pode ser usada em conjunto, mas não é incluída.
+- **Tipos acoplados a um container de DI** (`IFeatureModule`/`FeatureModuleExtensions` baseados em `IServiceCollection`): para manter o core com **zero dependências de runtime** e agnóstico de DI, o registro de serviços é tratado como padrão recomendado (seção 5.10), não como tipo embarcado. Um pacote satélite opcional para Microsoft.Extensions.DI fica no roadmap.
 
 ---
 
@@ -104,6 +107,8 @@ IDataSource<TData>                     (interface)
 
 UsecaseBase<TValue>                                (abstract class)
 UsecaseBaseCallData<TValue, TData>                 (abstract class)
+
+IFeatureService                         (interface — marcador para Service Layer; zero dependência)
 
 Unit                                   (sealed class — singleton)
 Nil                                    (sealed class — singleton)
@@ -164,7 +169,7 @@ string message = result.Match(
     onSuccess: value => $"OK: {value}",
     onError:   error => $"Erro: {error.Message}");
 
-// 2) Via switch expression (compilador avisa CS8524 se faltar caso)
+// 2) Via switch expression (compilador avisa CS8509 se faltar caso)
 string message = result switch
 {
     ReturnSuccessOrError<string>.Success(var value) => $"OK: {value}",
@@ -286,12 +291,11 @@ public abstract class UsecaseBase<TValue>
         CancellationToken cancellationToken = default)
     {
         if (!MonitorExecutionTime)
-            return await RunStageAsync(parameters, cancellationToken);
+            return await RunStageAsync(parameters, cancellationToken).ConfigureAwait(false);
 
-        var stopwatch = Stopwatch.StartNew();
-        var result = await RunStageAsync(parameters, cancellationToken);
-        stopwatch.Stop();
-        LogTime(GetType().Name, stopwatch.ElapsedMilliseconds, RunInBackground);
+        var startTimestamp = Stopwatch.GetTimestamp();
+        var result = await RunStageAsync(parameters, cancellationToken).ConfigureAwait(false);
+        LogTime(GetType().Name, Stopwatch.GetElapsedTime(startTimestamp), RunInBackground);
         return result;
     }
 
@@ -314,9 +318,9 @@ public abstract class UsecaseBase<TValue>
         }, cancellationToken);
     }
 
-    private static void LogTime(string name, long ms, bool background) =>
+    private static void LogTime(string name, TimeSpan elapsed, bool background) =>
         Debug.WriteLine($"[ReturnSuccessOrError] Execution Time {name} " +
-                        $"({(background ? "Background" : "Direct")}): {ms}ms");
+                        $"({(background ? "Background" : "Direct")}): {elapsed.TotalMilliseconds:F2}ms");
 }
 ```
 
@@ -352,12 +356,11 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         CancellationToken cancellationToken = default)
     {
         if (!MonitorExecutionTime)
-            return await RunAsync(parameters, cancellationToken);
+            return await RunAsync(parameters, cancellationToken).ConfigureAwait(false);
 
-        var stopwatch = Stopwatch.StartNew();
-        var result = await RunAsync(parameters, cancellationToken);
-        stopwatch.Stop();
-        LogTime(GetType().Name, stopwatch.ElapsedMilliseconds, RunInBackground);
+        var startTimestamp = Stopwatch.GetTimestamp();
+        var result = await RunAsync(parameters, cancellationToken).ConfigureAwait(false);
+        LogTime(GetType().Name, Stopwatch.GetElapsedTime(startTimestamp), RunInBackground);
         return result;
     }
 
@@ -366,7 +369,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         CancellationToken cancellationToken)
     {
         // FASE 1 — FETCH (no contexto da chamada; I/O-bound)
-        var fetchResult = await FetchAsync(parameters, cancellationToken);
+        var fetchResult = await FetchAsync(parameters, cancellationToken).ConfigureAwait(false);
 
         // FASE 2 — CURTO-CIRCUITO no erro
         if (fetchResult is ReturnSuccessOrError<TData>.Failure failure)
@@ -387,7 +390,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
                     parameters.Error.WithMessage(
                         $"{parameters.Error.Message} - Cod. BackgroundCatch --- Catch: {ex}"));
             }
-        }, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ReturnSuccessOrError<TData>> FetchAsync(
@@ -396,7 +399,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
     {
         try
         {
-            var data = await _dataSource.CallAsync(parameters, cancellationToken);
+            var data = await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
             return ReturnSuccessOrError<TData>.Ok(data);
         }
         catch (Exception ex)
@@ -407,9 +410,9 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         }
     }
 
-    private static void LogTime(string name, long ms, bool background) =>
+    private static void LogTime(string name, TimeSpan elapsed, bool background) =>
         Debug.WriteLine($"[ReturnSuccessOrError] Execution Time {name} " +
-                        $"({(background ? "Background" : "Direct")}): {ms}ms");
+                        $"({(background ? "Background" : "Direct")}): {elapsed.TotalMilliseconds:F2}ms");
 }
 ```
 
@@ -435,6 +438,60 @@ public sealed class Nil
 |---|---|---|
 | `Unit` | Operação sem valor de retorno (efeito colateral bem-sucedido) | `ReturnSuccessOrError<Unit>` |
 | `Nil` | `null` como resultado válido e esperado | `ReturnSuccessOrError<Nil>` |
+
+### 5.9 `IFeatureService`
+
+Interface marcadora para a camada de serviços de uma feature (Service Layer). Implementações funcionam como a "Facade de Domínio" que expõe os casos de uso públicos da feature, orquestrando-os de forma centralizada e ocultando os detalhes de implementação das camadas superiores (Controllers, Handlers).
+
+```csharp
+namespace ReturnSuccessOrError;
+
+/// <summary>
+/// Contrato marcador para serviços de feature (Service Layer).
+/// <para>
+/// Implementações são o ponto de entrada público de uma feature, encapsulando
+/// a orquestração de um ou mais <see cref="UsecaseBase{TValue}"/> /
+/// <see cref="UsecaseBaseCallData{TValue, TData}"/>.
+/// </para>
+/// </summary>
+public interface IFeatureService;
+```
+
+### 5.10 Metodologia de composição de features (convenção, não tipo embarcado)
+
+> **Decisão de design.** O registro de dependências é responsabilidade da **camada de composição** (`Program.cs`/Main), não do domínio. Para manter o core com **zero dependências de runtime** e **agnóstico de container de DI**, a biblioteca **não embarca** uma interface de módulo nem extensões acopladas a `IServiceCollection`. Em vez disso, descreve um **padrão recomendado** que o consumidor implementa no seu próprio projeto, com o container que ele já usa (Microsoft.Extensions.DI, Autofac, Lamar, Pure DI etc.).
+
+O padrão "Feature Module" como **Composition Root local**: cada feature expõe um ponto único que registra seus `DataSources`, `UseCases` e o `Service`. Para quem usa `Microsoft.Extensions.DependencyInjection`, basta o consumidor definir — **no app dele** — uma interface trivial e (opcionalmente) extensões fluentes:
+
+```csharp
+// Definido NO PROJETO DO CONSUMIDOR (não vem da biblioteca).
+// O consumidor escolhe a abstração de DI que usa — aqui, a do .NET.
+using Microsoft.Extensions.DependencyInjection;
+
+public interface IFeatureModule
+{
+    IServiceCollection RegisterServices(IServiceCollection services);
+}
+
+public static class FeatureModuleExtensions
+{
+    public static IServiceCollection AddFeature<TModule>(this IServiceCollection services)
+        where TModule : IFeatureModule, new()
+        => new TModule().RegisterServices(services);
+
+    public static IServiceCollection AddFeatures(
+        this IServiceCollection services, params IFeatureModule[] modules)
+    {
+        foreach (var module in modules)
+            module.RegisterServices(services);
+        return services;
+    }
+}
+```
+
+Quem faz **Pure DI** (composição manual) ou usa outro container simplesmente registra os tipos no estilo nativo desse container — sem precisar deste padrão. O único tipo que a biblioteca fornece para essa camada é o marcador `IFeatureService` (seção 5.9), que não depende de nada.
+
+> **Roadmap.** Se houver demanda, um **pacote satélite opcional** `ReturnSuccessOrError.DependencyInjection` poderá fornecer `IFeatureModule`/`AddFeature` prontos para `Microsoft.Extensions.DependencyInjection` — isolando a dependência fora do core, que permanece zero-dep.
 
 ---
 
@@ -534,6 +591,12 @@ Garante que o erro a ser retornado em caso de falha seja decidido **pelo chamado
 ### 9.10 Por que `Debug.WriteLine` para o monitoramento?
 Removido automaticamente em builds Release (a menos que `DEBUG` esteja definido), garantindo custo zero em produção — análogo a um recurso opt-in. Para observabilidade estruturada em produção, a versão futura preverá injeção opcional de `ILogger<T>`.
 
+### 9.11 Por que `ConfigureAwait(false)` em todos os `await` das classes base?
+Por ser uma **biblioteca**, ela não deve capturar nem voltar ao `SynchronizationContext` do chamador (UI/ASP.NET legado). `ConfigureAwait(false)` evita deadlocks em chamadores que bloqueiam (`.Result`/`.Wait()`) e elimina o custo de re-despacho ao contexto original — recomendação canônica para código de biblioteca (analyzer `CA2007`). Como `Process` é síncrono e o I/O roda na fonte de dados, nenhum estado de contexto precisa ser preservado entre as fases.
+
+### 9.12 Por que medir com `Stopwatch.GetTimestamp()`/`GetElapsedTime()` e não `new Stopwatch()`?
+A API estática (`Stopwatch.GetTimestamp()` + `Stopwatch.GetElapsedTime(start)`, disponível desde .NET 7) mede o intervalo **sem alocar** o objeto `Stopwatch` no heap. Como `MonitorExecutionTime` pode estar ligado em caminhos quentes, evitar a alocação mantém o overhead mínimo e é coerente com a meta AOT/zero-overhead.
+
 ---
 
 ## 10. Posicionamento no Ecossistema .NET
@@ -554,7 +617,7 @@ Pode coexistir com `MediatR`: um handler do MediatR pode delegar a um caso de us
 
 ## 11. Estratégia de Testes (resumo)
 
-Framework: **xUnit** + **NSubstitute** (mocking de `IDataSource<T>`) + **FluentAssertions**.
+Framework: **xUnit v3** + **NSubstitute** (mocking de `IDataSource<T>`) + **Shouldly** (asserts) + **coverlet** (cobertura).
 
 | Área | Cenários |
 |---|---|
@@ -573,16 +636,17 @@ Detalhamento completo no documento `DEVELOPMENT_PLAN.md`.
 
 | Tipo | Pacote | Uso |
 |---|---|---|
-| Runtime | *(nenhum)* | Apenas BCL `System.*` |
-| Dev/Test | `Microsoft.NET.Test.Sdk`, `xunit`, `xunit.runner.visualstudio` | Testes |
+| Runtime | **(nenhuma)** | O core depende apenas da BCL (`System.*`) — zero pacotes de runtime, AOT puro |
+| Dev/Test | `Microsoft.NET.Test.Sdk`, `xunit.v3`, `xunit.runner.visualstudio` | Testes (xUnit v3) |
 | Dev/Test | `NSubstitute` | Mocking de `IDataSource<T>` |
-| Dev/Test | `FluentAssertions` | Asserts legíveis |
+| Dev/Test | `Shouldly` | Asserts legíveis (`.ShouldBe(...)`) |
+| Dev/Test | `coverlet.collector` | Cobertura de código (`--collect:"XPlat Code Coverage"`) |
 
 ---
 
 ## 13. Requisitos Não-Funcionais
 
-- **Compatibilidade:** `net9.0` (alvo principal). Avaliar multi-targeting com `netstandard2.1` para ampliar alcance, condicionado ao uso de `record`/pattern matching disponíveis.
+- **Compatibilidade:** `net10.0` (alvo principal, LTS). Avaliar multi-targeting com `netstandard2.1` para ampliar alcance, condicionado ao uso de `record`/pattern matching disponíveis.
 - **Nullable reference types:** habilitado e sem warnings.
 - **Warnings como erros:** `TreatWarningsAsErrors=true`.
 - **Documentação XML:** gerada (`GenerateDocumentationFile=true`) para IntelliSense no consumidor.

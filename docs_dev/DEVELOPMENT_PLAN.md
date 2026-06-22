@@ -1,9 +1,9 @@
 # Plano de Desenvolvimento — ReturnSuccessOrError (.NET)
 
 **Produto:** Biblioteca NuGet `ReturnSuccessOrError`
-**Alvo:** .NET 9 / C# 13
+**Alvo:** .NET 10 (LTS) / C# 14
 **Objetivo:** Desenvolver e publicar uma biblioteca de domínio para o ecossistema .NET, implementando um result type discriminado e bases de caso de uso para Clean Architecture.
-**Documento de referência:** `docs/PRD.md`
+**Documento de referência:** `docs_dev/PRD.md`
 **Data:** 2026-06-22
 
 ---
@@ -32,9 +32,13 @@ ReturnSuccessOrError/
 │       │   └── NoParams.cs
 │       ├── DataSources/
 │       │   └── IDataSource.cs
-│       └── Usecases/
-│           ├── UsecaseBase.cs
-│           └── UsecaseBaseCallData.cs
+│       ├── Usecases/
+│       │   ├── UsecaseBase.cs
+│       │   └── UsecaseBaseCallData.cs
+│       └── Features/
+│           └── IFeatureService.cs              # marcador da Service Layer (zero dep)
+│                                               # IFeatureModule/AddFeature NÃO são embarcados:
+│                                               # são metodologia documentada (PRD 5.10)
 ├── tests/
 │   └── ReturnSuccessOrError.Tests/
 │       ├── ReturnSuccessOrError.Tests.csproj
@@ -46,9 +50,11 @@ ReturnSuccessOrError/
 │       │   └── ParametersTests.cs
 │       ├── DataSources/
 │       │   └── DataSourceTests.cs
-│       └── Usecases/
-│           ├── UsecaseBaseTests.cs
-│           └── UsecaseBaseCallDataTests.cs
+│       ├── Usecases/
+│       │   ├── UsecaseBaseTests.cs
+│       │   └── UsecaseBaseCallDataTests.cs
+│       └── Features/
+│           └── FeatureTests.cs
 └── samples/
     └── ReturnSuccessOrError.Samples/
         ├── ReturnSuccessOrError.Samples.csproj
@@ -68,8 +74,8 @@ ReturnSuccessOrError/
 ```xml
 <Project>
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <LangVersion>13</LangVersion>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -90,10 +96,10 @@ ReturnSuccessOrError/
 
     <!-- Metadados NuGet -->
     <PackageId>ReturnSuccessOrError</PackageId>
-    <Version>1.0.0</Version>
+    <!-- Versão derivada da tag git via MinVer (ver seção 6.5) — não fixar à mão. -->
     <Authors>pwlimaverde</Authors>
-    <Description>Result type discriminado (Success/Failure) e bases de caso de uso para Clean Architecture em .NET. Separa busca de dados (I/O) de processamento (CPU-bound) com background opcional. Zero dependências de runtime.</Description>
-    <PackageTags>clean-architecture;usecase;result;error-handling;railway;discriminated-union;functional</PackageTags>
+    <Description>Result type discriminado (Success/Failure) e bases de caso de uso para Clean Architecture em .NET. Separa busca de dados (I/O) de processamento (CPU-bound) com background opcional. Zero dependências de runtime; AOT-friendly.</Description>
+    <PackageTags>clean-architecture;usecase;result;error-handling;railway;discriminated-union;functional;aot</PackageTags>
     <RepositoryUrl>https://github.com/pwlimaverde/return-success-or-error-dotnet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -103,14 +109,24 @@ ReturnSuccessOrError/
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
+
+    <!-- Validação de compatibilidade de API entre versões (best practice de libs NuGet) -->
+    <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <!-- Core SEM dependências de runtime. Versionamento automático pela tag git. -->
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="6.*" PrivateAssets="all" />
+  </ItemGroup>
+
 </Project>
 ```
+
+> `MinVer` é uma dependência **somente de build** (`PrivateAssets="all"`): deriva a `Version` da tag git (`v1.2.0` → `1.2.0`) no momento do `pack` e **não** é propagada ao consumidor. O core continua com **zero dependências de runtime**.
 
 ### 2.3 `tests/ReturnSuccessOrError.Tests/ReturnSuccessOrError.Tests.csproj`
 
@@ -118,16 +134,22 @@ ReturnSuccessOrError/
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- xUnit v3 roda sobre o Microsoft.Testing.Platform: projeto de teste é um executável. -->
+    <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
-    <PackageReference Include="xunit" Version="2.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+    <PackageReference Include="xunit.v3" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.*" />
     <PackageReference Include="NSubstitute" Version="5.*" />
-    <PackageReference Include="FluentAssertions" Version="6.*" />
+    <PackageReference Include="Shouldly" Version="4.*" />
+    <PackageReference Include="coverlet.collector" Version="6.*">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
@@ -137,7 +159,9 @@ ReturnSuccessOrError/
 </Project>
 ```
 
-### 2.4 `samples/ReturnSuccessOrError.Samples.csproj`
+> **Versões dos pacotes:** os `N.*` acima fixam a **major** desejada; confirme a major estável atual de `xunit.v3`, `xunit.runner.visualstudio`, `Shouldly`, `MinVer` e `coverlet.collector` no NuGet.org ao criar os projetos (evoluem com frequência). O alvo `net10.0` e `LangVersion 14` (C# 14) já são o stack mais recente e não mudam.
+
+### 2.4 `samples/ReturnSuccessOrError.Samples/ReturnSuccessOrError.Samples.csproj`
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
@@ -147,6 +171,8 @@ ReturnSuccessOrError/
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\ReturnSuccessOrError\ReturnSuccessOrError.csproj" />
+    <!-- DI fica no CONSUMIDOR (sample), não no core: demonstra a metodologia da seção 5.10. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" />
   </ItemGroup>
 </Project>
 ```
@@ -168,8 +194,11 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 | 7 | `IDataSource<T>` | `DataSources/IDataSource.cs` | `IParametersReturnResult` |
 | 8 | `UsecaseBase<T>` | `Usecases/UsecaseBase.cs` | itens 1–6 |
 | 9 | `UsecaseBaseCallData<T,D>` | `Usecases/UsecaseBaseCallData.cs` | itens 1–7 |
+| 10 | `IFeatureService` | `Features/IFeatureService.cs` | itens 1-6, 8-9 |
 
-> O código de referência completo de cada componente está na **Seção 5 do PRD** (`docs/PRD.md`). Este plano não duplica o código; usa-o como fonte de verdade.
+> `IFeatureModule`/`FeatureModuleExtensions` **não** são implementados na biblioteca: são metodologia documentada (PRD seção 5.10), entregue como exemplo nos samples e no README. Isso mantém o core com zero dependências e agnóstico de container de DI.
+>
+> O código de referência completo de cada componente está na **Seção 5 do PRD** (`docs_dev/PRD.md`). Este plano não duplica o código; usa-o como fonte de verdade.
 
 ### 3.1 Convenções de API (resumo)
 
@@ -188,6 +217,8 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 | Flag background | `RunInBackground` (`init`) | afeta só o processamento |
 | Flag medição | `MonitorExecutionTime` (`init`) | log via `Debug.WriteLine` |
 | Códigos de erro | `Cod. 02-1` (fetch), `Cod. BackgroundCatch` (process) | rastreabilidade |
+| Service Layer | `IFeatureService` | Interface marcadora de serviço de feature (único tipo de feature embarcado; zero dep) |
+| Composition Root | *(convenção)* | Padrão "Feature Module" documentado (PRD 5.10) — o consumidor implementa no container dele |
 
 ---
 
@@ -195,9 +226,10 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 
 ### 4.1 Frameworks
 
-- **xUnit** — runner e asserts base.
+- **xUnit v3** — runner e asserts base (sobre Microsoft.Testing.Platform).
 - **NSubstitute** — substitutos para `IDataSource<T>`.
-- **FluentAssertions** — asserts legíveis (`result.Should().BeOfType<...>()`).
+- **Shouldly** — asserts legíveis (`result.ShouldBeOfType<...>()`), licença BSD/gratuita.
+- **coverlet.collector** — cobertura de código.
 
 ### 4.2 Matriz de Cenários
 
@@ -237,6 +269,10 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 - Paridade direto ↔ background (mesmo resultado).
 - `CancellationToken` é repassado ao `IDataSource.CallAsync`.
 
+**`Features/FeatureTests.cs`**
+- `IFeatureService` é uma interface marcadora utilizável: um serviço de feature de exemplo pode implementá-la e ser referenciado por esse tipo.
+- (O padrão "Feature Module" / `AddFeature` é metodologia do consumidor — demonstrado nos samples, não testado como API da biblioteca.)
+
 ### 4.3 Exemplos de Teste
 
 ```csharp
@@ -269,9 +305,9 @@ public class UsecaseBaseCallDataTests
         var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha")));
 
         // Assert
-        var failure = result.Should().BeOfType<ReturnSuccessOrError<string>.Failure>().Subject;
-        failure.Error.Message.Should().Contain("Cod. 02-1");
-        processChamado.Should().BeFalse();
+        var failure = result.ShouldBeOfType<ReturnSuccessOrError<string>.Failure>();
+        failure.Error.Message.ShouldContain("Cod. 02-1");
+        processChamado.ShouldBeFalse();
     }
 
     [Fact]
@@ -288,7 +324,7 @@ public class UsecaseBaseCallDataTests
         result.Match(
             onSuccess: v => v,
             onError: e => e.Message
-        ).Should().Be("valor: 42");
+        ).ShouldBe("valor: 42");
     }
 
     [Fact]
@@ -315,7 +351,7 @@ public class UsecaseBaseCallDataTests
 
 ## 5. Samples
 
-Três features demonstrando os modos de uso, em um único Console App (`Program.cs` executa as três em sequência):
+Três features demonstrando os modos de uso, em um único Console App (`Program.cs` executa as três em sequência). O projeto de samples também inclui um `IFeatureModule`/`FeatureModuleExtensions` **definidos localmente** (não importados da biblioteca) para demonstrar a metodologia de composição da seção 5.10 do PRD com `Microsoft.Extensions.DependencyInjection` — provando que o padrão funciona sem que o core dependa de DI.
 
 ### 5.1 `CheckConnection` — `UsecaseBaseCallData`, 3 cenários
 - `FakeConnectivityDataSource(online, shouldThrow)`.
@@ -425,9 +461,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # histórico completo: MinVer e Source Link precisam das tags
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
+          cache: true
       - run: dotnet restore
       - run: dotnet build --configuration Release --no-restore
       - run: dotnet test --configuration Release --no-build --collect:"XPlat Code Coverage"
@@ -444,13 +483,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # MinVer deriva a versão da tag vX.Y.Z deste checkout
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
+          cache: true
       - run: dotnet restore
       - run: dotnet test --configuration Release
       - run: dotnet pack src/ReturnSuccessOrError/ReturnSuccessOrError.csproj
                --configuration Release --output ./artifacts
+               -p:ContinuousIntegrationBuild=true   # build determinístico (Source Link)
       - run: dotnet nuget push ./artifacts/*.nupkg
                --source https://api.nuget.org/v3/index.json
                --api-key ${{ secrets.NUGET_API_KEY }}
@@ -458,13 +501,15 @@ jobs:
 ```
 
 > **Pré-requisito:** registrar o segredo `NUGET_API_KEY` no repositório e confirmar que o `PackageId` `ReturnSuccessOrError` está disponível no NuGet.org.
+>
+> **Versão pela tag:** o `pack` não recebe `-p:Version`; o `MinVer` lê a tag git (`v1.2.0`) do checkout e define `1.2.0` automaticamente. Um `pack` sem tag gera uma versão de pré-release derivada do último tag + altura de commits.
 
 ### 6.5 Versionamento
 
-Seguir **SemVer**:
-- `1.0.0` — primeira release estável.
+Seguir **SemVer**, com a versão **derivada da tag git** via `MinVer` (sem editar o `.csproj` a cada release):
+- `git tag v1.0.0` → pacote `1.0.0` — primeira release estável.
 - `1.x` — adições retrocompatíveis (ex.: conversões implícitas, `ILogger`).
-- `2.0.0` — mudanças que quebram a API pública.
+- `2.0.0` — mudanças que quebram a API pública (o `EnablePackageValidation` ajuda a detectá-las).
 
 ---
 
@@ -536,17 +581,22 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 - [ ] `Cod. 02-1` (fetch) e `Cod. BackgroundCatch` (process) cobertos por teste.
 - [ ] Curto-circuito verificado (process não chamado em falha de fetch).
 - [ ] `Unit` e `Nil` como singletons.
+- [ ] `IFeatureService` (marcador) presente; sem tipos acoplados a `IServiceCollection` no core.
+- [ ] `ConfigureAwait(false)` em todos os `await` das classes base.
 
 ### Empacotamento
 - [ ] `dotnet pack` gera `.nupkg` + `.snupkg`.
+- [ ] **Zero dependências de runtime** no `.nuspec` gerado (apenas a BCL; `MinVer` é build-only).
+- [ ] Versão do pacote bate com a tag git (validar `MinVer`).
 - [ ] `dotnet-validate` sem erros.
 - [ ] README, LICENSE (MIT) e documentação XML incluídos no pacote.
 - [ ] `PackageId` disponível no NuGet.org.
 - [ ] Instalação testada em projeto consumidor separado.
 
 ### Compatibilidade
-- [ ] Compila e roda em `net9.0`.
+- [ ] Compila e roda em `net10.0`.
 - [ ] Verificado AOT-friendly (sem reflexão; `IsAotCompatible=true`).
+- [ ] Publicação AOT de um app consumidor sem warnings de trimming/AOT.
 
 ---
 
@@ -558,13 +608,14 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 | 1.2 | Métodos de composição (`Map`, `Bind`/`Then`, `Ensure`) | Encadeamento estilo railway |
 | 1.3 | Injeção opcional de `ILogger<T>` para `MonitorExecutionTime` | Observabilidade estruturada em produção |
 | 1.4 | Multi-targeting `netstandard2.1` | Ampliar alcance a consumidores legados |
+| 1.x | Pacote satélite opcional `ReturnSuccessOrError.DependencyInjection` (`IFeatureModule`/`AddFeature` para Microsoft.Extensions.DI) | Conveniência de composição sem acoplar o core; só para quem usa o container do .NET |
 | 2.0 | Avaliar source generator para reduzir boilerplate de casos de uso | Ergonomia, se houver demanda |
 
 ---
 
 ## 11. Referências
 
-- **PRD:** `docs/PRD.md`
+- **PRD:** `docs_dev/PRD.md`
 - **C# records:** https://learn.microsoft.com/dotnet/csharp/language-reference/builtin-types/record
 - **Pattern matching:** https://learn.microsoft.com/dotnet/csharp/language-reference/operators/patterns
 - **Task Parallel Library:** https://learn.microsoft.com/dotnet/standard/parallel-programming/task-parallel-library-tpl
