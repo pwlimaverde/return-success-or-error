@@ -25,7 +25,7 @@ A `ReturnSuccessOrError` resolve esses problemas estruturando o fluxo de execuç
 - **Orquestração em Fases (Fetch ➔ Curto-Circuito ➔ Process)**: A classe base orquestra a busca de dados na infraestrutura (I/O assíncrona) e isola o processamento puro no domínio. Se a busca falhar, ocorre um curto-circuito imediato: a fase de processamento de negócio sequer é executada.
 - **Separação de Threads Inteligente**: A busca de dados (I/O) sempre ocorre de forma assíncrona tradicional. Contudo, o processamento de regras de negócio (CPU-bound) pode ser opcionalmente delegado ao pool de threads do .NET em segundo plano (`Task.Run`) com uma simples flag (`RunInBackground = true`), mantendo a infraestrutura de I/O intacta na thread original.
 - **Preservação de Tipos (`IAppError.WithMessage`)**: Os erros de domínio são imutáveis. Ao enriquecer mensagens de erro durante a subida de camadas, o tipo concreto do erro é preservado, permitindo logs e tratamentos específicos.
-- **Rastreabilidade Integrada**: Exceções capturadas na infraestrutura são automaticamente enriquecidas com códigos de rastreio (`Cod. 02-1` para falhas na busca de dados, `Cod. BackgroundCatch` para exceções no processamento em segundo plano), facilitando a depuração em ambientes de produção.
+- **Rastreabilidade Integrada**: Exceções capturadas na infraestrutura são automaticamente enriquecidas com códigos de rastreio descritivos e centralizados em constantes (`ErrorCodes.DataSourceCatch` para falhas na busca de dados, `ErrorCodes.BackgroundCatch` para exceções no processamento em segundo plano), facilitando a depuração em ambientes de produção.
 - **Cancelamento Cooperativo (`CancellationToken`)**: Todo o fluxo — busca de dados e processamento — propaga `CancellationToken` de ponta a ponta, integrando-se nativamente com o modelo de cancelamento do ASP.NET Core e da BCL.
 
 ---
@@ -138,7 +138,7 @@ Chamador (Controller/Handler)
   │
   ├── FASE 1 (Fetch): Busca de dados brutos assíncrona (I/O) no contexto do chamador.
   │     ├── Sucesso ➔ Retorna os dados brutos obtidos.
-  │     └── Exceção ➔ Captura automática, mapeia para IAppError (Cod. 02-1).
+  │     └── Exceção ➔ Captura automática, mapeia para IAppError (Cod. DataSourceCatch).
   │
   ├── FASE 2 (Curto-Circuito): Se a busca falhou, o fluxo é interrompido.
   │     └── O erro mapeado retorna diretamente para o chamador (Processamento é ignorado).
@@ -189,7 +189,7 @@ public sealed record GerarRelatorioParameters(
 
 ### 3. Definição da Fonte de Dados (`IDataSource`)
 
-A fonte de dados é implementada na camada de infraestrutura. Em caso de falha, ela lança uma exceção que será automaticamente encapsulada pela classe base com o código de rastreio `Cod. 02-1`:
+A fonte de dados é implementada na camada de infraestrutura. Em caso de falha, ela lança uma exceção que será automaticamente encapsulada pela classe base com o código de rastreio `Cod. DataSourceCatch`:
 
 ```csharp
 public interface IObterDadosVendasDataSource : IDataSource<List<VendaCrua>>;
@@ -548,7 +548,7 @@ A biblioteca enriquece automaticamente as mensagens de erro com códigos de rast
 | Origem da Falha | Código | Descrição |
 | :--- | :--- | :--- |
 | Regra de negócio deliberada | — | O `Process` retorna `Failure` diretamente com a mensagem customizada. |
-| Exceção na busca de dados | `Cod. 02-1` | `IDataSource.CallAsync` lança exceção; capturada e enriquecida automaticamente. |
+| Exceção na busca de dados | `Cod. DataSourceCatch` | `IDataSource.CallAsync` lança exceção; capturada e enriquecida automaticamente. |
 | Exceção no processamento em background | `Cod. BackgroundCatch` | `Process` lança exceção dentro de `Task.Run`; capturada e enriquecida automaticamente. |
 
 Em todos os casos, o tipo concreto do `IAppError` é preservado via `WithMessage`, e a mensagem é enriquecida com o código de rastreio e o conteúdo da exceção.

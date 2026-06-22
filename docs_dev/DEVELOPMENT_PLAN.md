@@ -26,7 +26,8 @@ ReturnSuccessOrError/
 │       │   └── Nil.cs
 │       ├── Errors/
 │       │   ├── IAppError.cs
-│       │   └── ErrorGeneric.cs
+│       │   ├── ErrorGeneric.cs
+│       │   └── ErrorCodes.cs              # constantes de rastreio (DataSourceCatch/BackgroundCatch)
 │       ├── Parameters/
 │       │   ├── IParametersReturnResult.cs
 │       │   └── NoParams.cs
@@ -187,6 +188,7 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 |---|---|---|---|
 | 1 | `IAppError` | `Errors/IAppError.cs` | — |
 | 2 | `ErrorGeneric` | `Errors/ErrorGeneric.cs` | `IAppError` |
+| 2b | `ErrorCodes` | `Errors/ErrorCodes.cs` | — |
 | 3 | `IParametersReturnResult` | `Parameters/IParametersReturnResult.cs` | `IAppError` |
 | 4 | `NoParams` | `Parameters/NoParams.cs` | `IParametersReturnResult`, `ErrorGeneric` |
 | 5 | `Unit`, `Nil` | `Core/Unit.cs`, `Core/Nil.cs` | — |
@@ -216,7 +218,7 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 | Caso de uso c/ dados | `UsecaseBaseCallData<TValue, TData>` | método abstrato `Process(data, parameters)` |
 | Flag background | `RunInBackground` (`init`) | afeta só o processamento |
 | Flag medição | `MonitorExecutionTime` (`init`) | log via `Debug.WriteLine` |
-| Códigos de erro | `Cod. 02-1` (fetch), `Cod. BackgroundCatch` (process) | rastreabilidade |
+| Códigos de erro | `ErrorCodes.DataSourceCatch` (fetch), `ErrorCodes.BackgroundCatch` (process) | constantes nomeadas; rastreabilidade |
 | Service Layer | `IFeatureService` | Interface marcadora de serviço de feature (único tipo de feature embarcado; zero dep) |
 | Composition Root | *(convenção)* | Padrão "Feature Module" documentado (PRD 5.10) — o consumidor implementa no container dele |
 
@@ -264,7 +266,7 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 **`Usecases/UsecaseBaseCallDataTests.cs`**
 - Sucesso completo: `Process` recebe o dado do fetch e devolve `Success`.
 - **Curto-circuito**: quando o fetch lança, `Process` **não** é chamado (verificar com flag/spy).
-- Falha no fetch → `Failure` com `Cod. 02-1` e tipo de erro preservado.
+- Falha no fetch → `Failure` com `ErrorCodes.DataSourceCatch` e tipo de erro preservado.
 - Exceção no `Process` em background → `Cod. BackgroundCatch`.
 - Paridade direto ↔ background (mesmo resultado).
 - `CancellationToken` é repassado ao `IDataSource.CallAsync`.
@@ -291,7 +293,7 @@ public class UsecaseBaseCallDataTests
     }
 
     [Fact]
-    public async Task CallAsync_QuandoFetchFalha_RetornaCod021_ESemChamarProcess()
+    public async Task CallAsync_QuandoFetchFalha_RetornaDataSourceCatch_ESemChamarProcess()
     {
         // Arrange
         var ds = Substitute.For<IDataSource<int>>();
@@ -306,7 +308,7 @@ public class UsecaseBaseCallDataTests
 
         // Assert
         var failure = result.ShouldBeOfType<ReturnSuccessOrError<string>.Failure>();
-        failure.Error.Message.ShouldContain("Cod. 02-1");
+        failure.Error.Message.ShouldContain(ErrorCodes.DataSourceCatch);
         processChamado.ShouldBeFalse();
     }
 
@@ -356,7 +358,7 @@ Três features demonstrando os modos de uso, em um único Console App (`Program.
 ### 5.1 `CheckConnection` — `UsecaseBaseCallData`, 3 cenários
 - `FakeConnectivityDataSource(online, shouldThrow)`.
 - `CheckConnectionUsecase` mapeia `bool` → mensagem.
-- Demonstra: sucesso, erro de negócio (offline), exceção capturada (`Cod. 02-1`).
+- Demonstra: sucesso, erro de negócio (offline), exceção capturada (`ErrorCodes.DataSourceCatch`).
 
 ```csharp
 public sealed class CheckConnectionUsecase(IDataSource<bool> ds)
@@ -578,7 +580,7 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 - [ ] `IParametersReturnResult` + `NoParams` com erro default.
 - [ ] `IDataSource<T>.CallAsync` com `CancellationToken`.
 - [ ] `UsecaseBase<T>` e `UsecaseBaseCallData<T,D>` com `Process` abstrato.
-- [ ] `Cod. 02-1` (fetch) e `Cod. BackgroundCatch` (process) cobertos por teste.
+- [ ] `ErrorCodes.DataSourceCatch` (fetch) e `ErrorCodes.BackgroundCatch` (process) cobertos por teste; códigos centralizados em constantes (sem literais mágicos).
 - [ ] Curto-circuito verificado (process não chamado em falha de fetch).
 - [ ] `Unit` e `Nil` como singletons.
 - [ ] `IFeatureService` (marcador) presente; sem tipos acoplados a `IServiceCollection` no core.

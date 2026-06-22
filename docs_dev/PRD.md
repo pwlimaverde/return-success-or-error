@@ -69,6 +69,7 @@ Desenvolvedores .NET (back-end com ASP.NET Core, serviços, workers, ou apps MAU
 - Tipo de resultado discriminado selado (`ReturnSuccessOrError<TValue>`) com subtipos `Success` e `Failure`.
 - Método `Match` e suporte a `switch` por padrão para consumo exaustivo.
 - Contrato de erro (`IAppError`) e implementação concreta (`ErrorGeneric`).
+- Códigos de rastreio centralizados em constantes (`ErrorCodes.DataSourceCatch` / `ErrorCodes.BackgroundCatch`).
 - Contrato de parâmetros (`IParametersReturnResult`) e implementação concreta (`NoParams`).
 - Contrato de fonte de dados (`IDataSource<TData>`).
 - Classes base de caso de uso: lógica pura e lógica com fonte de dados.
@@ -99,6 +100,8 @@ ReturnSuccessOrError<TValue>            (abstract record, selado por construtor 
 
 IAppError                              (interface)
 └── ErrorGeneric                       (sealed record)
+
+ErrorCodes                             (static class — constantes de rastreio)
 
 IParametersReturnResult                (interface)
 └── NoParams                           (sealed record)
@@ -220,6 +223,30 @@ public sealed record ApiError(string Message, int StatusCode) : IAppError
 }
 ```
 
+#### 5.3.1 `ErrorCodes` — Códigos de Rastreio (constantes)
+
+Os códigos que a biblioteca anexa às mensagens ao capturar exceções **não** são literais mágicos espalhados pelo código: ficam centralizados em constantes nomeadas e descritivas. Isso dá um nome único de verdade (o consumidor referencia `ErrorCodes.DataSourceCatch` em testes/filtros em vez de copiar a string) e torna os códigos coerentes entre si (`DataSourceCatch` ↔ `BackgroundCatch`, ambos no padrão `<Origem>Catch`).
+
+```csharp
+namespace ReturnSuccessOrError;
+
+/// <summary>
+/// Códigos de rastreio anexados às mensagens de erro pela infraestrutura da
+/// biblioteca ao converter exceções em <see cref="IAppError"/>. Públicos para
+/// permitir asserções e filtros sem depender de strings literais.
+/// </summary>
+public static class ErrorCodes
+{
+    /// <summary>Exceção lançada pela fonte de dados durante o fetch (fase 1).</summary>
+    public const string DataSourceCatch = "DataSourceCatch";
+
+    /// <summary>Exceção lançada por <c>Process</c> ao rodar em background (fase 3).</summary>
+    public const string BackgroundCatch = "BackgroundCatch";
+}
+```
+
+> A mensagem final fica, por exemplo: `Falha ao buscar vendas - Cod. DataSourceCatch --- Catch: System.InvalidOperationException: ...`. O prefixo `Cod.` é mantido por legibilidade; o token após ele é sempre uma constante de `ErrorCodes`.
+
 ### 5.4 `IParametersReturnResult` — Contrato de Parâmetros
 
 ```csharp
@@ -313,7 +340,7 @@ public abstract class UsecaseBase<TValue>
             {
                 return ReturnSuccessOrError<TValue>.Err(
                     parameters.Error.WithMessage(
-                        $"{parameters.Error.Message} - Cod. BackgroundCatch --- Catch: {ex}"));
+                        $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}"));
             }
         }, cancellationToken);
     }
@@ -388,7 +415,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
             {
                 return ReturnSuccessOrError<TValue>.Err(
                     parameters.Error.WithMessage(
-                        $"{parameters.Error.Message} - Cod. BackgroundCatch --- Catch: {ex}"));
+                        $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}"));
             }
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -406,7 +433,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         {
             return ReturnSuccessOrError<TData>.Err(
                 parameters.Error.WithMessage(
-                    $"{parameters.Error.Message} - Cod. 02-1 --- Catch: {ex}"));
+                    $"{parameters.Error.Message} - Cod. {ErrorCodes.DataSourceCatch} --- Catch: {ex}"));
         }
     }
 
@@ -528,7 +555,7 @@ Toda operação é assíncrona e cooperativamente cancelável, alinhada às conv
 | Origem | Código | Como ocorre |
 |---|---|---|
 | Erro de negócio deliberado | — | O próprio `Process` devolve `Failure(parameters.Error.WithMessage(...))` |
-| Exceção na busca de dados | `Cod. 02-1` | `IDataSource.CallAsync` lança; capturado em `FetchAsync` e enriquecido |
+| Exceção na busca de dados | `Cod. DataSourceCatch` | `IDataSource.CallAsync` lança; capturado em `FetchAsync` e enriquecido |
 | Exceção no processamento em background | `Cod. BackgroundCatch` | `Process` lança dentro de `Task.Run`; capturado e enriquecido |
 
 Em todos os casos de exceção, o **tipo concreto** do `IAppError` é preservado via `WithMessage`, e a mensagem é enriquecida com o código de rastreio e o conteúdo da exceção (`--- Catch: {ex}`).
@@ -544,7 +571,7 @@ Chamador
 [UsecaseBase]                          [UsecaseBaseCallData]
   Process(parameters)                    FASE 1: await dataSource.CallAsync(...)
    └─ direto ou Task.Run                   ├─ sucesso → Success<TData>(dado bruto)
-   └─ exceção em bg → BackgroundCatch       └─ exceção → Cod. 02-1 → Failure<TData>
+   └─ exceção em bg → BackgroundCatch       └─ exceção → Cod. DataSourceCatch → Failure<TData>
                                           FASE 2: is Failure? → propaga Failure<TValue>
                                           FASE 3: Process(dado, parameters)
                                             └─ direto ou Task.Run
@@ -623,7 +650,7 @@ Framework: **xUnit v3** + **NSubstitute** (mocking de `IDataSource<T>`) + **Shou
 |---|---|
 | `ReturnSuccessOrError<T>` | acesso a `Success.Value`/`Failure.Error`, igualdade por valor, `Match`, `Switch`, exaustividade |
 | `UsecaseBase<T>` | execução direta, em background, `MonitorExecutionTime`, exceção → `Cod. BackgroundCatch`, resultado `Unit`/`Nil` |
-| `UsecaseBaseCallData<T,D>` | sucesso fetch+process, curto-circuito (process não chamado em falha de fetch), `Cod. 02-1`, paridade direto↔background, `CancellationToken` propagado |
+| `UsecaseBaseCallData<T,D>` | sucesso fetch+process, curto-circuito (process não chamado em falha de fetch), `Cod. DataSourceCatch`, paridade direto↔background, `CancellationToken` propagado |
 | `IAppError`/`ErrorGeneric` | comparação por valor, `WithMessage` preserva tipo concreto |
 | `NoParams` | erro default vs customizado |
 | `IDataSource<T>` | sucesso e exceção |
@@ -662,5 +689,5 @@ Detalhamento completo no documento `DEVELOPMENT_PLAN.md`.
 1. Modela o desfecho de operações como uma **união discriminada selada** (`Success`/`Failure`), tornando o tratamento de erro obrigatório e verificável.
 2. Fornece **bases de caso de uso** que orquestram busca de dados, curto-circuito de erros e processamento — o desenvolvedor escreve apenas `Process`.
 3. Separa **I/O (busca)** de **CPU-bound (processamento)**, permitindo despachar o processamento pesado ao thread pool com uma flag.
-4. Preserva o **tipo concreto dos erros** ao enriquecê-los, com rastreabilidade via `Cod. 02-1` e `Cod. BackgroundCatch`.
+4. Preserva o **tipo concreto dos erros** ao enriquecê-los, com rastreabilidade via constantes `ErrorCodes.DataSourceCatch` e `ErrorCodes.BackgroundCatch`.
 5. É **idiomática em .NET**: async/await, `CancellationToken`, records, pattern matching, DI por construtor, zero dependências de runtime, AOT-friendly.

@@ -23,7 +23,7 @@ Idioma: toda comunicação e documentação em **português (pt-br)**. Identific
 dotnet build -c Release                      # build (TreatWarningsAsErrors=true)
 dotnet test                                  # todos os testes
 dotnet test --filter "FullyQualifiedName~UsecaseBaseCallDataTests"   # uma classe
-dotnet test --filter "Name=CallAsync_QuandoFetchFalha_RetornaCod021_ESemChamarProcess"  # um teste
+dotnet test --filter "Name=CallAsync_QuandoFetchFalha_RetornaDataSourceCatch_ESemChamarProcess"  # um teste
 dotnet test --collect:"XPlat Code Coverage"  # cobertura (meta > 90%)
 dotnet pack src/ReturnSuccessOrError/ReturnSuccessOrError.csproj -c Release -o ./artifacts
 dotnet run --project samples/ReturnSuccessOrError.Samples   # roda as 3 features de exemplo
@@ -38,9 +38,9 @@ A biblioteca gira em torno de uma **união discriminada selada** e duas **classe
 **Tipo central — `ReturnSuccessOrError<TValue>`:** `abstract record` com **construtor privado** (fecha a hierarquia) e dois `sealed record` aninhados, `Success(TValue Value)` e `Failure(IAppError Error)`. Consumo via `.Match(onSuccess, onError)` (exaustivo) ou `switch`. Fábricas: `.Ok(value)` / `.Err(error)`.
 
 **Fluxo do `UsecaseBaseCallData<TValue, TData>` (3 fases) — o conceito mais importante:**
-1. **FETCH** — `await IDataSource<TData>.CallAsync(...)` no contexto da chamada (I/O-bound; nunca vai para background). Exceção aqui é capturada e vira `Failure` com código `Cod. 02-1`.
+1. **FETCH** — `await IDataSource<TData>.CallAsync(...)` no contexto da chamada (I/O-bound; nunca vai para background). Exceção aqui é capturada e vira `Failure` com código `ErrorCodes.DataSourceCatch`.
 2. **CURTO-CIRCUITO** — se o fetch falhou, retorna o erro imediatamente; `Process` **não** é chamado.
-3. **PROCESS** — `Process(data, parameters)` (CPU-bound). Roda direto ou, se `RunInBackground=true`, despachado para o thread pool via `Task.Run`. Exceção aqui vira `Failure` com código `Cod. BackgroundCatch`.
+3. **PROCESS** — `Process(data, parameters)` (CPU-bound). Roda direto ou, se `RunInBackground=true`, despachado para o thread pool via `Task.Run`. Exceção aqui vira `Failure` com código `ErrorCodes.BackgroundCatch`.
 
 `UsecaseBase<TValue>` é a variante sem fonte de dados — só fase 3.
 
@@ -61,5 +61,5 @@ A biblioteca gira em torno de uma **união discriminada selada** e duas **classe
 - Imutabilidade via `record` + `with`; flags de caso de uso (`RunInBackground`, `MonitorExecutionTime`) são propriedades `init`.
 - Fonte de dados injetada via construtor (compatível com `Microsoft.Extensions.DependencyInjection`).
 - Todo `await` nas classes base usa `.ConfigureAwait(false)` (código de biblioteca). Medição de tempo via `Stopwatch.GetTimestamp()`/`GetElapsedTime()` (sem alocação).
-- Testes: xUnit v3 + NSubstitute (mock de `IDataSource<T>`) + Shouldly + coverlet. Cobrir obrigatoriamente: curto-circuito, `Cod. 02-1`, `Cod. BackgroundCatch`, paridade direto↔background e propagação do `CancellationToken`.
+- Testes: xUnit v3 + NSubstitute (mock de `IDataSource<T>`) + Shouldly + coverlet. Cobrir obrigatoriamente: curto-circuito, `ErrorCodes.DataSourceCatch`, `ErrorCodes.BackgroundCatch`, paridade direto↔background e propagação do `CancellationToken`.
 - Sem reflexão em runtime (manter AOT-friendly). Core com **zero dependências de runtime**; `MinVer` (build-only) versiona pela tag git.
