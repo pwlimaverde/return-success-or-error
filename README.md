@@ -1,5 +1,10 @@
 # ReturnSuccessOrError
 
+[![NuGet](https://img.shields.io/nuget/v/ReturnSuccessOrError.svg)](https://www.nuget.org/packages/ReturnSuccessOrError/)
+[![Downloads](https://img.shields.io/nuget/dt/ReturnSuccessOrError.svg)](https://www.nuget.org/packages/ReturnSuccessOrError/)
+[![CI](https://github.com/pwlimaverde/return-success-or-error/actions/workflows/ci.yml/badge.svg)](https://github.com/pwlimaverde/return-success-or-error/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Uma biblioteca .NET mínima, opinativa e extremamente eficiente que fornece abstrações para a camada de domínio (casos de uso e fontes de dados) seguindo os princípios de **Clean Architecture** e **SOLID**.
 
 O elemento central é o tipo de resultado discriminado e selado `ReturnSuccessOrError<TValue>`, que representa o desfecho de qualquer operação como **Sucesso** ou **Falha**, forçando o consumidor a tratar explicitamente ambos os cenários em tempo de compilação.
