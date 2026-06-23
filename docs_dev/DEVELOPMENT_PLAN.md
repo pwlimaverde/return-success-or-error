@@ -86,6 +86,15 @@ ReturnSuccessOrError/
 </Project>
 ```
 
+> **Supressões de analisadores (decisão de implementação).** `AnalysisLevel=latest-all` +
+> `TreatWarningsAsErrors` transforma algumas regras CA em erro que conflitam com decisões de
+> design **deliberadas** do PRD. Em vez de mutar a API, suprimimos no `.editorconfig` (escopo
+> `src/ReturnSuccessOrError/**.cs`) apenas estas, com justificativa: `CA1034` (tipos aninhados
+> `Success`/`Failure` — §5.2), `CA1000` (fábricas estáticas `Ok`/`Err` em genérico — §5.2),
+> `CA1724` (nome do tipo = namespace), `CA1716` (membro `Error` — §5.4), `CA1040`
+> (`IFeatureService` marcador — §5.9), `CA1031` (captura de `Exception` na fronteira — §9.5) e
+> `CA1062` (guardas de null redundantes com nullable habilitado). Todas as demais regras seguem ativas.
+
 ### 2.2 `src/ReturnSuccessOrError/ReturnSuccessOrError.csproj`
 
 ```xml
@@ -101,11 +110,11 @@ ReturnSuccessOrError/
     <Authors>pwlimaverde</Authors>
     <Description>Result type discriminado (Success/Failure) e bases de caso de uso para Clean Architecture em .NET. Separa busca de dados (I/O) de processamento (CPU-bound) com background opcional. Zero dependências de runtime; AOT-friendly.</Description>
     <PackageTags>clean-architecture;usecase;result;error-handling;railway;discriminated-union;functional;aot</PackageTags>
-    <RepositoryUrl>https://github.com/pwlimaverde/return-success-or-error-dotnet</RepositoryUrl>
+    <RepositoryUrl>https://github.com/pwlimaverde/return-success-or-error</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/pwlimaverde/return-success-or-error-dotnet</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/pwlimaverde/return-success-or-error</PackageProjectUrl>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
