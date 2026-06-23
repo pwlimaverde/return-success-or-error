@@ -90,3 +90,16 @@ dotnet_diagnostic.CA1859.severity = none
 dotnet_diagnostic.xUnit1051.severity = none
 # Membros auxiliares de fixtures de teste não precisam ser estáticos.
 dotnet_diagnostic.CA1822.severity = none
+
+# ---- Projeto de samples: app de demonstração, não código de biblioteca ----
+[samples/**.cs]
+# App: tipos pedagógicos públicos não precisam ser internal.
+dotnet_diagnostic.CA1515.severity = none
+# App de console: sem SynchronizationContext problemático, ConfigureAwait é ruído.
+dotnet_diagnostic.CA2007.severity = none
+# Nullable habilitado: guardas de null explícitas são redundantes.
+dotnet_diagnostic.CA1062.severity = none
+# Nomes de parâmetro didáticos (p, online, rows) conforme exemplos da spec.
+dotnet_diagnostic.CA1725.severity = none
+# 'SalesReport' (tipo) coincide com a pasta/namespace da feature — estrutura intencional.
+dotnet_diagnostic.CA1724.severity = none
