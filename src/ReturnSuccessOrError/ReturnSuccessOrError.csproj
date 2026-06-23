@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <!-- Metadados NuGet -->
+    <PackageId>ReturnSuccessOrError</PackageId>
+    <!-- Versão derivada da tag git via MinVer (ver DEVELOPMENT_PLAN seção 6.5) — não fixar à mão. -->
+    <Authors>pwlimaverde</Authors>
+    <Description>Result type discriminado (Success/Failure) e bases de caso de uso para Clean Architecture em .NET. Separa busca de dados (I/O) de processamento (CPU-bound) com background opcional. Zero dependências de runtime; AOT-friendly.</Description>
+    <PackageTags>clean-architecture;usecase;result;error-handling;railway;discriminated-union;functional;aot</PackageTags>
+    <RepositoryUrl>https://github.com/pwlimaverde/return-success-or-error</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/pwlimaverde/return-success-or-error</PackageProjectUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+
+    <!-- Validação de compatibilidade de API entre versões (best practice de libs NuGet) -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- Core SEM dependências de runtime. Versionamento automático pela tag git. -->
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="6.*" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

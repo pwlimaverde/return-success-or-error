@@ -101,11 +101,11 @@ ReturnSuccessOrError/
     <Authors>pwlimaverde</Authors>
     <Description>Result type discriminado (Success/Failure) e bases de caso de uso para Clean Architecture em .NET. Separa busca de dados (I/O) de processamento (CPU-bound) com background opcional. Zero dependências de runtime; AOT-friendly.</Description>
     <PackageTags>clean-architecture;usecase;result;error-handling;railway;discriminated-union;functional;aot</PackageTags>
-    <RepositoryUrl>https://github.com/pwlimaverde/return-success-or-error-dotnet</RepositoryUrl>
+    <RepositoryUrl>https://github.com/pwlimaverde/return-success-or-error</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/pwlimaverde/return-success-or-error-dotnet</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/pwlimaverde/return-success-or-error</PackageProjectUrl>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
