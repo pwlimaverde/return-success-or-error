@@ -79,3 +79,14 @@ dotnet_diagnostic.CA1040.severity = none
 dotnet_diagnostic.CA1031.severity = none
 # Nullable habilitado: a não-nulidade dos delegates é o contrato; guardas explícitas são redundantes.
 dotnet_diagnostic.CA1062.severity = none
+
+# ---- Projeto de testes: relaxar regras inadequadas a código de teste ----
+[tests/**.cs]
+# Nomes de teste usam underscore (Metodo_Cenario_Resultado) — convenção universal de testes.
+dotnet_diagnostic.CA1707.severity = none
+# Sugestão de performance irrelevante em arrange de teste.
+dotnet_diagnostic.CA1859.severity = none
+# Os testes usam tokens próprios (inclusive para verificar propagação) — não o TestContext.
+dotnet_diagnostic.xUnit1051.severity = none
+# Membros auxiliares de fixtures de teste não precisam ser estáticos.
+dotnet_diagnostic.CA1822.severity = none
