@@ -74,6 +74,17 @@ public class UsecaseBaseTests
     }
 
     [Fact]
+    public async Task CallAsync_Direto_ExcecaoEmProcess_Propaga()
+    {
+        // Contrato (PRD §5.6): em modo direto, Process não é envolto em try/catch —
+        // a exceção propaga ao chamador. Só o modo background a converte em Failure.
+        var usecase = new ThrowingUsecase(); // RunInBackground = false
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => usecase.CallAsync(new TestParams(new ErrorGeneric("e"))));
+    }
+
+    [Fact]
     public async Task CallAsync_ComMonitorExecutionTime_NaoAlteraResultado()
     {
         var usecase = new DoubleUsecase { MonitorExecutionTime = true };

@@ -1,0 +1,23 @@
+# Normaliza fins de linha: o repositório usa LF; o checkout no Windows converte conforme o core.autocrlf.
+* text=auto
+
+# Fontes e configs sempre LF no repositório.
+*.cs        text eol=lf
+*.csproj    text eol=lf
+*.props     text eol=lf
+*.targets   text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.md        text eol=lf
+*.editorconfig text eol=lf
+*.sln       text eol=crlf
+*.slnx      text eol=lf
+
+# Binários: sem conversão.
+*.png       binary
+*.jpg       binary
+*.ico       binary
+*.snk       binary
+*.nupkg     binary
+*.snupkg    binary

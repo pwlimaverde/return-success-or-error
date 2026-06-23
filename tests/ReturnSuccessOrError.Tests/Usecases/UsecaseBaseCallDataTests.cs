@@ -101,6 +101,21 @@ public class UsecaseBaseCallDataTests
     }
 
     [Fact]
+    public async Task CallAsync_Direto_ExcecaoEmProcess_Propaga()
+    {
+        // Contrato (PRD §5.7): com fetch OK e modo direto, Process não é envolto em
+        // try/catch — a exceção propaga. Só o modo background vira BackgroundCatch.
+        var ds = Substitute.For<IDataSource<int>>();
+        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+          .Returns(1);
+
+        var usecase = new ThrowingProcessUsecase(ds); // RunInBackground = false
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => usecase.CallAsync(new TestParams(new ErrorGeneric("e"))));
+    }
+
+    [Fact]
     public async Task CallAsync_ParidadeDiretoBackground()
     {
         var ds = Substitute.For<IDataSource<int>>();
