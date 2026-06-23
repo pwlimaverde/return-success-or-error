@@ -4,12 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Estado do repositório
 
-**Fase de planejamento — ainda não há código.** O repositório contém apenas a especificação:
+**Implementado — biblioteca completa e testada, preparando a release v1.0.0.** A solution (`net10.0`) tem a lib, testes e samples funcionando; 36 testes verdes (~98% de cobertura); pacote validado com `dotnet-validate` (zero dependências de runtime). Falta apenas a publicação no NuGet (tag git `v1.0.0`).
+
+Documentação de referência:
 
 - `docs_dev/PRD.md` — define O QUE é a biblioteca: objetivos, tipos públicos (com assinaturas C# completas), padrões, fluxo de erros e decisões de design. **É a fonte de verdade da API.**
 - `docs_dev/DEVELOPMENT_PLAN.md` — define COMO construir: estrutura da solution, `.csproj`, ordem de implementação, matriz de testes, samples, NuGet/CI/CD.
+- `CHANGELOG.md` — histórico de versões (formato Keep a Changelog + SemVer).
 
-Ao implementar, **siga essas specs**; não reinvente nomes ou assinaturas. Se divergir da spec por um bom motivo, atualize o doc correspondente no mesmo passo.
+Ao evoluir o código, **siga essas specs**; não reinvente nomes ou assinaturas. Se divergir da spec por um bom motivo, atualize o doc correspondente no mesmo passo.
+
+> **Analisadores:** `AnalysisLevel=latest-all` + `TreatWarningsAsErrors` ativam todas as regras CA. O `.editorconfig` suprime — com justificativa e escopadas por glob (`src`/`tests`/`samples`) — apenas as regras que conflitam com decisões de design deliberadas do PRD (ex.: CA1034 tipos aninhados, CA1000 fábricas estáticas, CA1031 catch na fronteira). Antes de suprimir uma nova, verifique se é decisão de design já documentada.
 
 Idioma: toda comunicação e documentação em **português (pt-br)**. Identificadores e código em inglês.
 

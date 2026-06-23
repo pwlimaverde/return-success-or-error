@@ -6,10 +6,14 @@
 
     <!-- Metadados NuGet -->
     <PackageId>ReturnSuccessOrError</PackageId>
+    <Title>ReturnSuccessOrError</Title>
+    <Product>ReturnSuccessOrError</Product>
     <!-- Versão derivada da tag git via MinVer (ver DEVELOPMENT_PLAN seção 6.5) — não fixar à mão. -->
     <Authors>pwlimaverde</Authors>
+    <Copyright>Copyright (c) 2026 pwlimaverde</Copyright>
     <Description>Result type discriminado (Success/Failure) e bases de caso de uso para Clean Architecture em .NET. Separa busca de dados (I/O) de processamento (CPU-bound) com background opcional. Zero dependências de runtime; AOT-friendly.</Description>
     <PackageTags>clean-architecture;usecase;result;error-handling;railway;discriminated-union;functional;aot</PackageTags>
+    <PackageReleaseNotes>Veja o histórico completo em CHANGELOG.md: https://github.com/pwlimaverde/return-success-or-error/blob/dev/CHANGELOG.md</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/pwlimaverde/return-success-or-error</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
