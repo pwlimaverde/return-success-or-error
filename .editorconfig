@@ -59,3 +59,23 @@ csharp_preferred_modifier_order = public,private,protected,internal,static,exter
 
 # 'readonly' onde possível
 dotnet_style_readonly_field = true:warning
+
+# ---- Supressões justificadas (escopo: biblioteca principal) ----
+# Com AnalysisLevel=latest-all + TreatWarningsAsErrors, algumas regras CA conflitam
+# com decisões de design DELIBERADAS e documentadas no PRD §5/§9. Suprimimos só essas,
+# mantendo todas as demais ativas.
+[src/ReturnSuccessOrError/**.cs]
+# União discriminada selada: Success/Failure são tipos aninhados por design (PRD §5.2).
+dotnet_diagnostic.CA1034.severity = none
+# Fábricas estáticas Ok/Err em tipo genérico — API especificada (PRD §5.2).
+dotnet_diagnostic.CA1000.severity = none
+# Nome do tipo central coincide com o namespace, por design.
+dotnet_diagnostic.CA1724.severity = none
+# Propriedade 'Error' faz parte do contrato público de parâmetros (PRD §5.4).
+dotnet_diagnostic.CA1716.severity = none
+# IFeatureService é interface marcadora intencional para a Service Layer (PRD §5.9).
+dotnet_diagnostic.CA1040.severity = none
+# Exceções são capturadas e convertidas em Failure na fronteira da fonte de dados (PRD §9.5).
+dotnet_diagnostic.CA1031.severity = none
+# Nullable habilitado: a não-nulidade dos delegates é o contrato; guardas explícitas são redundantes.
+dotnet_diagnostic.CA1062.severity = none

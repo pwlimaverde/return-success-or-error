@@ -86,6 +86,15 @@ ReturnSuccessOrError/
 </Project>
 ```
 
+> **Supressões de analisadores (decisão de implementação).** `AnalysisLevel=latest-all` +
+> `TreatWarningsAsErrors` transforma algumas regras CA em erro que conflitam com decisões de
+> design **deliberadas** do PRD. Em vez de mutar a API, suprimimos no `.editorconfig` (escopo
+> `src/ReturnSuccessOrError/**.cs`) apenas estas, com justificativa: `CA1034` (tipos aninhados
+> `Success`/`Failure` — §5.2), `CA1000` (fábricas estáticas `Ok`/`Err` em genérico — §5.2),
+> `CA1724` (nome do tipo = namespace), `CA1716` (membro `Error` — §5.4), `CA1040`
+> (`IFeatureService` marcador — §5.9), `CA1031` (captura de `Exception` na fronteira — §9.5) e
+> `CA1062` (guardas de null redundantes com nullable habilitado). Todas as demais regras seguem ativas.
+
 ### 2.2 `src/ReturnSuccessOrError/ReturnSuccessOrError.csproj`
 
 ```xml
