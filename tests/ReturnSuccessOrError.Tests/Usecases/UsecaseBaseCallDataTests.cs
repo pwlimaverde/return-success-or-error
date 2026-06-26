@@ -8,12 +8,12 @@ namespace ReturnSuccessOrError.Tests.Usecases;
 
 public class UsecaseBaseCallDataTests
 {
-    private sealed record TestParams(IAppError Error) : IParametersReturnResult;
+    private sealed record TestParams(AppError Error) : ParametersReturnResult(Error);
 
     private sealed class StringUsecase(IDataSource<int> ds, Action? onProcess = null)
         : UsecaseBaseCallData<string, int>(ds)
     {
-        protected override ReturnSuccessOrError<string> Process(int data, IParametersReturnResult p)
+        protected override ReturnSuccessOrError<string> Process(int data, ParametersReturnResult p)
         {
             onProcess?.Invoke();
             return ReturnSuccessOrError<string>.Ok($"valor: {data}");
@@ -23,21 +23,18 @@ public class UsecaseBaseCallDataTests
     private sealed class ThrowingProcessUsecase(IDataSource<int> ds)
         : UsecaseBaseCallData<string, int>(ds)
     {
-        protected override ReturnSuccessOrError<string> Process(int data, IParametersReturnResult p)
+        protected override ReturnSuccessOrError<string> Process(int data, ParametersReturnResult p)
             => throw new InvalidOperationException("process-boom");
     }
 
     // Erro de domínio customizado: valida preservação de tipo no fetch-catch.
-    private sealed record ApiError(string Message, int StatusCode) : IAppError
-    {
-        public IAppError WithMessage(string message) => this with { Message = message };
-    }
+    private sealed record ApiError(string Message, int StatusCode) : AppError(Message);
 
     [Fact]
     public async Task CallAsync_ComSucesso_ProcessaDadoDoFetch()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .Returns(42);
 
         var usecase = new StringUsecase(ds);
@@ -54,7 +51,7 @@ public class UsecaseBaseCallDataTests
     public async Task CallAsync_QuandoFetchFalha_RetornaDataSourceCatch_ESemChamarProcess()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .ThrowsAsync(new InvalidOperationException("db down"));
 
         var processChamado = false;
@@ -71,7 +68,7 @@ public class UsecaseBaseCallDataTests
     public async Task CallAsync_QuandoFetchFalha_PreservaTipoConcretoDoErro()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .ThrowsAsync(new InvalidOperationException("db down"));
 
         var usecase = new StringUsecase(ds);
@@ -88,7 +85,7 @@ public class UsecaseBaseCallDataTests
     public async Task CallAsync_Background_ExcecaoEmProcess_RetornaBackgroundCatch()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .Returns(1);
 
         var usecase = new ThrowingProcessUsecase(ds) { RunInBackground = true };
@@ -106,7 +103,7 @@ public class UsecaseBaseCallDataTests
         // Contrato (PRD §5.7): com fetch OK e modo direto, Process não é envolto em
         // try/catch — a exceção propaga. Só o modo background vira BackgroundCatch.
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .Returns(1);
 
         var usecase = new ThrowingProcessUsecase(ds); // RunInBackground = false
@@ -119,7 +116,7 @@ public class UsecaseBaseCallDataTests
     public async Task CallAsync_ParidadeDiretoBackground()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .Returns(7);
 
         var direto = new StringUsecase(ds);
@@ -136,7 +133,7 @@ public class UsecaseBaseCallDataTests
     public async Task CallAsync_ComMonitorExecutionTime_NaoAlteraResultado()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .Returns(42);
 
         var usecase = new StringUsecase(ds) { MonitorExecutionTime = true };
@@ -150,12 +147,12 @@ public class UsecaseBaseCallDataTests
     public async Task CallAsync_PropagaCancellationToken()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>()).Returns(1);
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>()).Returns(1);
         var usecase = new StringUsecase(ds);
         using var cts = new CancellationTokenSource();
 
         await usecase.CallAsync(new TestParams(new ErrorGeneric("x")), cts.Token);
 
-        await ds.Received(1).CallAsync(Arg.Any<IParametersReturnResult>(), cts.Token);
+        await ds.Received(1).CallAsync(Arg.Any<ParametersReturnResult>(), cts.Token);
     }
 }

@@ -8,13 +8,13 @@ namespace ReturnSuccessOrError.Tests.DataSources;
 
 public class DataSourceTests
 {
-    private sealed record TestParams(IAppError Error) : IParametersReturnResult;
+    private sealed record TestParams(AppError Error) : ParametersReturnResult(Error);
 
     [Fact]
     public async Task DataSource_EmSucesso_RetornaDadoBruto()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .Returns(99);
 
         var data = await ds.CallAsync(new TestParams(new ErrorGeneric("x")));
@@ -26,7 +26,7 @@ public class DataSourceTests
     public async Task DataSource_EmFalha_LancaExcecao()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .ThrowsAsync(new InvalidOperationException("db down"));
 
         await Should.ThrowAsync<InvalidOperationException>(

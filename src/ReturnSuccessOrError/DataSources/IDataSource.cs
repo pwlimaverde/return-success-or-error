@@ -9,10 +9,11 @@ namespace ReturnSuccessOrError;
 public interface IDataSource<TData>
 {
     /// <summary>
-    /// Executa a chamada externa e devolve o dado bruto, ou lança o
-    /// <see cref="IAppError"/> dos parâmetros (como exceção) em caso de falha.
+    /// Executa a chamada externa e devolve o dado bruto, ou lança uma exceção em caso
+    /// de falha — a classe base a captura e a converte em
+    /// <see cref="ReturnSuccessOrError{TValue}.Failure"/> usando o <see cref="AppError"/> dos parâmetros.
     /// </summary>
     Task<TData> CallAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken = default);
 }

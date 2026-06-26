@@ -6,14 +6,14 @@ namespace ReturnSuccessOrError.Tests.Usecases;
 
 public class UsecaseBaseTests
 {
-    private sealed record TestParams(IAppError Error) : IParametersReturnResult;
+    private sealed record TestParams(AppError Error) : ParametersReturnResult(Error);
 
     // Caso de uso que devolve o dobro do número nos parâmetros.
-    private sealed record NumberParams(int N, IAppError Error) : IParametersReturnResult;
+    private sealed record NumberParams(int N, AppError Error) : ParametersReturnResult(Error);
 
     private sealed class DoubleUsecase : UsecaseBase<int>
     {
-        protected override ReturnSuccessOrError<int> Process(IParametersReturnResult parameters)
+        protected override ReturnSuccessOrError<int> Process(ParametersReturnResult parameters)
         {
             var p = (NumberParams)parameters;
             return ReturnSuccessOrError<int>.Ok(p.N * 2);
@@ -22,19 +22,19 @@ public class UsecaseBaseTests
 
     private sealed class ThrowingUsecase : UsecaseBase<int>
     {
-        protected override ReturnSuccessOrError<int> Process(IParametersReturnResult parameters)
+        protected override ReturnSuccessOrError<int> Process(ParametersReturnResult parameters)
             => throw new InvalidOperationException("kaboom");
     }
 
     private sealed class UnitUsecase : UsecaseBase<Unit>
     {
-        protected override ReturnSuccessOrError<Unit> Process(IParametersReturnResult parameters)
+        protected override ReturnSuccessOrError<Unit> Process(ParametersReturnResult parameters)
             => ReturnSuccessOrError<Unit>.Ok(Unit.Value);
     }
 
     private sealed class NilUsecase : UsecaseBase<Nil>
     {
-        protected override ReturnSuccessOrError<Nil> Process(IParametersReturnResult parameters)
+        protected override ReturnSuccessOrError<Nil> Process(ParametersReturnResult parameters)
             => ReturnSuccessOrError<Nil>.Ok(Nil.Value);
     }
 

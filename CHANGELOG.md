@@ -17,12 +17,13 @@ com result type discriminado e bases de caso de uso. Zero dependências de runti
 - **`ReturnSuccessOrError<TValue>`** — união discriminada selada (`abstract record` com
   construtor privado) com os casos aninhados `Success` e `Failure`. Fábricas `Ok`/`Err`,
   consumo exaustivo via `Match` (com retorno) e `Switch` (efeitos colaterais).
-- **`IAppError`** + **`ErrorGeneric`** — erro de domínio como valor imutável; `WithMessage`
-  enriquece a mensagem **preservando o tipo concreto**.
+- **`AppError`** (`abstract record`) + **`ErrorGeneric`** — erro de domínio como valor imutável;
+  `WithMessage` (implementado uma vez na base, via clone virtual do `record`) enriquece a mensagem
+  **preservando o tipo concreto**. Subtipos herdam — não reimplementam.
 - **`ErrorCodes`** — códigos de rastreio centralizados em constantes: `DataSourceCatch`
   (falha na busca de dados) e `BackgroundCatch` (exceção no processamento em background).
-- **`IParametersReturnResult`** + **`NoParams`** — contrato de parâmetros que carrega o erro
-  a ser usado em caso de falha (com erro default não-nulo em `NoParams`).
+- **`ParametersReturnResult`** (`abstract record`) + **`NoParams`** — contrato de parâmetros que
+  carrega o erro a ser usado em caso de falha (com erro default não-nulo em `NoParams`).
 - **`IDataSource<TData>`** — contrato de fonte de dados (I/O-bound) com `CancellationToken`.
 - **`UsecaseBase<TValue>`** — caso de uso de lógica pura (apenas processamento).
 - **`UsecaseBaseCallData<TValue, TData>`** — caso de uso com fonte de dados, orquestrando o

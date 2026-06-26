@@ -4,7 +4,7 @@ using ReturnSuccessOrError.Samples.Composition;
 namespace ReturnSuccessOrError.Samples.Features.CheckConnection;
 
 /// <summary>Parâmetros da verificação de conectividade.</summary>
-public sealed record CheckConnectionParameters(IAppError Error) : IParametersReturnResult;
+public sealed record CheckConnectionParameters(AppError Error) : ParametersReturnResult(Error);
 
 /// <summary>
 /// Fonte de dados fake de conectividade. <paramref name="online"/> define o resultado;
@@ -14,7 +14,7 @@ public sealed class FakeConnectivityDataSource(bool online, bool shouldThrow = f
     : IDataSource<bool>
 {
     public Task<bool> CallAsync(
-        IParametersReturnResult parameters, CancellationToken cancellationToken = default)
+        ParametersReturnResult parameters, CancellationToken cancellationToken = default)
     {
         if (shouldThrow)
             throw new InvalidOperationException("Falha de rede ao verificar conectividade");
@@ -26,7 +26,7 @@ public sealed class FakeConnectivityDataSource(bool online, bool shouldThrow = f
 public sealed class CheckConnectionUsecase(IDataSource<bool> ds)
     : UsecaseBaseCallData<string, bool>(ds)
 {
-    protected override ReturnSuccessOrError<string> Process(bool online, IParametersReturnResult p)
+    protected override ReturnSuccessOrError<string> Process(bool online, ParametersReturnResult p)
         => online
             ? ReturnSuccessOrError<string>.Ok("You are connected")
             : ReturnSuccessOrError<string>.Err(p.Error.WithMessage("You are offline"));

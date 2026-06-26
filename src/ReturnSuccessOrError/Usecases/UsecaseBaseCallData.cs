@@ -29,11 +29,11 @@ public abstract class UsecaseBaseCallData<TValue, TData>
     /// <summary>Regra de negócio: recebe o dado bruto já carregado e os parâmetros.</summary>
     protected abstract ReturnSuccessOrError<TValue> Process(
         TData data,
-        IParametersReturnResult parameters);
+        ParametersReturnResult parameters);
 
     /// <summary>Executa o caso de uso (fetch → curto-circuito → process).</summary>
     public async Task<ReturnSuccessOrError<TValue>> CallAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken = default)
     {
         if (!MonitorExecutionTime)
@@ -46,7 +46,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
     }
 
     private async Task<ReturnSuccessOrError<TValue>> RunAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken)
     {
         // FASE 1 — FETCH (no contexto da chamada; I/O-bound)
@@ -75,7 +75,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
     }
 
     private async Task<ReturnSuccessOrError<TData>> FetchAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken)
     {
         try

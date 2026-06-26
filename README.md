@@ -29,7 +29,7 @@ A `ReturnSuccessOrError` resolve esses problemas estruturando o fluxo de execuç
 - **União Discriminada Selada (`ReturnSuccessOrError<TValue>`)**: Força o tratamento exaustivo de sucesso ou falha através de `Match`/`Switch` ou `switch` expression em C#. O compilador avisa caso você esqueça de lidar com o erro.
 - **Orquestração em Fases (Fetch ➔ Curto-Circuito ➔ Process)**: A classe base orquestra a busca de dados na infraestrutura (I/O assíncrona) e isola o processamento puro no domínio. Se a busca falhar, ocorre um curto-circuito imediato: a fase de processamento de negócio sequer é executada.
 - **Separação de Threads Inteligente**: A busca de dados (I/O) sempre ocorre de forma assíncrona tradicional. Contudo, o processamento de regras de negócio (CPU-bound) pode ser opcionalmente delegado ao pool de threads do .NET em segundo plano (`Task.Run`) com uma simples flag (`RunInBackground = true`), mantendo a infraestrutura de I/O intacta na thread original.
-- **Preservação de Tipos (`IAppError.WithMessage`)**: Os erros de domínio são imutáveis. Ao enriquecer mensagens de erro durante a subida de camadas, o tipo concreto do erro é preservado, permitindo logs e tratamentos específicos.
+- **Preservação de Tipos (`AppError.WithMessage`)**: Os erros de domínio são imutáveis. Ao enriquecer mensagens de erro durante a subida de camadas, o tipo concreto do erro é preservado, permitindo logs e tratamentos específicos.
 - **Rastreabilidade Integrada**: Exceções capturadas na infraestrutura são automaticamente enriquecidas com códigos de rastreio descritivos e centralizados em constantes (`ErrorCodes.DataSourceCatch` para falhas na busca de dados, `ErrorCodes.BackgroundCatch` para exceções no processamento em segundo plano), facilitando a depuração em ambientes de produção.
 - **Cancelamento Cooperativo (`CancellationToken`)**: Todo o fluxo — busca de dados e processamento — propaga `CancellationToken` de ponta a ponta, integrando-se nativamente com o modelo de cancelamento do ASP.NET Core e da BCL.
 
@@ -59,13 +59,13 @@ A biblioteca é estruturada em torno de tipos simples com responsabilidades úni
 | :--- | :--- |
 | `ReturnSuccessOrError<TValue>` | União discriminada abstrata e selada contendo os tipos aninhados `Success` e `Failure`. |
 | `Success(TValue Value)` | Subtipo selado que encapsula o valor de sucesso. |
-| `Failure(IAppError Error)` | Subtipo selado que encapsula o erro de domínio. |
+| `Failure(AppError Error)` | Subtipo selado que encapsula o erro de domínio. |
 | `Match<TResult>` | Método que força o consumo exaustivo com retorno tipado (duas funções: `onSuccess` + `onError`). |
 | `Switch` | Variante de `Match` sem retorno, para efeitos colaterais como logging. |
-| `IAppError` | Contrato para erros de domínio imutáveis. Expõe `Message` e `WithMessage` para enriquecimento preservando o tipo concreto. |
-| `ErrorGeneric` | Implementação padrão de `IAppError` (`sealed record`). Pronta para uso quando não há necessidade de campos adicionais. |
-| `IParametersReturnResult` | Contrato de entrada do Caso de Uso. Garante que todo parâmetro traga consigo o `IAppError` a ser usado em caso de falha. |
-| `NoParams` | Implementação padrão de `IParametersReturnResult` para chamadas sem parâmetros extras, com erro default via implementação explícita de interface. |
+| `AppError` | `abstract record` para erros de domínio imutáveis. Expõe `Message` e `WithMessage` (herdado) para enriquecimento preservando o tipo concreto. |
+| `ErrorGeneric` | Implementação padrão de `AppError` (`sealed record`). Pronta para uso quando não há necessidade de campos adicionais. |
+| `ParametersReturnResult` | `abstract record` de entrada do Caso de Uso. Garante que todo parâmetro traga consigo o `AppError` a ser usado em caso de falha. |
+| `NoParams` | Implementação padrão de `ParametersReturnResult` para chamadas sem parâmetros extras, com `AppError` default não-nulo quando nenhum é informado. |
 | `IDataSource<TData>` | Abstração da fonte de dados externa (Porta de saída na arquitetura). Retorna o dado bruto ou lança a falha. |
 | `UsecaseBase<TValue>` | Classe base para casos de uso com lógica pura de negócio, sem consultas externas. |
 | `UsecaseBaseCallData<TValue, TData>` | Classe base que orquestra busca de dados via `IDataSource<TData>`, curto-circuito e processamento. |
@@ -120,9 +120,9 @@ MinhaAplicacao/
 
 | Subdiretório | Responsabilidade | Dependências Permitidas |
 | :--- | :--- | :--- |
-| `Domain/Errors/` | Define records `sealed` implementando `IAppError`. | Apenas a biblioteca principal. |
+| `Domain/Errors/` | Define records `sealed` implementando `AppError`. | Apenas a biblioteca principal. |
 | `Domain/Models/` | Entidades e modelos de domínio imutáveis. | Sem dependências externas. |
-| `Domain/Parameters/` | Parâmetros de entrada dos casos de uso (`IParametersReturnResult`). | Apenas a biblioteca principal. |
+| `Domain/Parameters/` | Parâmetros de entrada dos casos de uso (`ParametersReturnResult`). | Apenas a biblioteca principal. |
 | `Domain/Services/` | Interface do serviço da feature (`IXxxService : IFeatureService`). | Apenas a biblioteca principal. |
 | `Domain/UseCases/` | Casos de uso herdando de `UsecaseBase` ou `UsecaseBaseCallData`. | Apenas a biblioteca principal e modelos da feature. |
 | `DataSources/` | Interfaces de `IDataSource<T>` e suas implementações concretas (infraestrutura). | Depende de frameworks externos (EF, gRPC, HTTP). |
@@ -143,7 +143,7 @@ Chamador (Controller/Handler)
   │
   ├── FASE 1 (Fetch): Busca de dados brutos assíncrona (I/O) no contexto do chamador.
   │     ├── Sucesso ➔ Retorna os dados brutos obtidos.
-  │     └── Exceção ➔ Captura automática, mapeia para IAppError (Cod. DataSourceCatch).
+  │     └── Exceção ➔ Captura automática, mapeia para AppError (Cod. DataSourceCatch).
   │
   ├── FASE 2 (Curto-Circuito): Se a busca falhou, o fluxo é interrompido.
   │     └── O erro mapeado retorna diretamente para o chamador (Processamento é ignorado).
@@ -163,20 +163,17 @@ result.Match(onSuccess: ..., onError: ...)   // Tratamento obrigatório
 
 ## 💻 Exemplos Práticos de Uso
 
-### 1. Definição do Erro de Domínio (`IAppError`)
+### 1. Definição do Erro de Domínio (`AppError`)
 
-Crie erros imutáveis utilizando `record` para garantir igualdade por valor. O método `WithMessage` preserva o tipo concreto do erro:
+`AppError` é um `abstract record`: basta herdar e declarar seus campos. O método `WithMessage` (que preserva o tipo concreto) é herdado da base — você não reimplementa nada:
 
 ```csharp
-public sealed record RelatorioErro(string Message, int CodigoInterno) : IAppError
-{
-    public IAppError WithMessage(string message) => this with { Message = message };
-}
+public sealed record RelatorioErro(string Message, int CodigoInterno) : AppError(Message);
 ```
 
 > Para casos simples, a biblioteca já fornece o `ErrorGeneric(string Message)` pronto para uso.
 
-### 2. Definição dos Parâmetros (`IParametersReturnResult`)
+### 2. Definição dos Parâmetros (`ParametersReturnResult`)
 
 Os parâmetros envelopam todas as entradas necessárias para a execução do caso de uso e definem o erro que será propagado em caso de falhas de I/O:
 
@@ -184,12 +181,12 @@ Os parâmetros envelopam todas as entradas necessárias para a execução do cas
 public sealed record GerarRelatorioParameters(
     int Mes,
     int Ano,
-    IAppError Error) : IParametersReturnResult;
+    AppError Error) : ParametersReturnResult(Error);
 ```
 
 > Para chamadas sem parâmetros extras, a biblioteca fornece o `NoParams`:
 > ```csharp
-> var parametros = new NoParams(Error: new ErrorGeneric("Erro inesperado"));
+> var parametros = new NoParams(new ErrorGeneric("Erro inesperado"));
 > ```
 
 ### 3. Definição da Fonte de Dados (`IDataSource`)
@@ -207,7 +204,7 @@ public class ObterDadosVendasDataSource : IObterDadosVendasDataSource
     public ObterDadosVendasDataSource(AppDbContext db) => _db = db;
 
     public async Task<List<VendaCrua>> CallAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken = default)
     {
         return await _db.Vendas
@@ -232,7 +229,7 @@ public class GerarRelatorioUseCase : UsecaseBaseCallData<RelatorioVendasResult, 
 
     protected override ReturnSuccessOrError<RelatorioVendasResult> Process(
         List<VendaCrua> data,
-        IParametersReturnResult parameters)
+        ParametersReturnResult parameters)
     {
         if (data.Count == 0)
         {
@@ -258,7 +255,7 @@ Para regras de negócio que não dependem de fontes de dados externas:
 public class CalcularComissaoUseCase : UsecaseBase<decimal>
 {
     protected override ReturnSuccessOrError<decimal> Process(
-        IParametersReturnResult parameters)
+        ParametersReturnResult parameters)
     {
         var parametros = (ComissaoParameters)parameters;
 
@@ -347,15 +344,9 @@ Abaixo está o exemplo completo da feature **Auth** de ponta a ponta, usando o c
 
 ```csharp
 // Features/Auth/Domain/Errors/AuthErrors.cs
-public sealed record AuthError(string Message) : IAppError
-{
-    public IAppError WithMessage(string message) => this with { Message = message };
-}
+public sealed record AuthError(string Message) : AppError(Message);
 
-public sealed record UnauthorizedError(string Message) : IAppError
-{
-    public IAppError WithMessage(string message) => this with { Message = message };
-}
+public sealed record UnauthorizedError(string Message) : AppError(Message);
 
 // Features/Auth/Domain/Models/Session.cs
 public sealed record Session(
@@ -368,9 +359,9 @@ public sealed record Session(
 }
 
 // Features/Auth/Domain/Parameters/AuthParameters.cs
-public sealed record LoginParameters(string Email, string Password, IAppError Error) : IParametersReturnResult;
-public sealed record RefreshParameters(string RefreshToken, IAppError Error) : IParametersReturnResult;
-public sealed record LogoutParameters(string? RefreshToken, IAppError Error) : IParametersReturnResult;
+public sealed record LoginParameters(string Email, string Password, AppError Error) : ParametersReturnResult(Error);
+public sealed record RefreshParameters(string RefreshToken, AppError Error) : ParametersReturnResult(Error);
+public sealed record LogoutParameters(string? RefreshToken, AppError Error) : ParametersReturnResult(Error);
 ```
 
 #### 7.2 Interfaces dos DataSources (Portas)
@@ -390,7 +381,7 @@ public class LoginUseCase : UsecaseBaseCallData<Session, Session>
 {
     public LoginUseCase(ILoginDataSource dataSource) : base(dataSource) { }
 
-    protected override ReturnSuccessOrError<Session> Process(Session data, IParametersReturnResult parameters)
+    protected override ReturnSuccessOrError<Session> Process(Session data, ParametersReturnResult parameters)
         => ReturnSuccessOrError<Session>.Ok(data);
 }
 
@@ -399,7 +390,7 @@ public class RefreshTokenUseCase : UsecaseBaseCallData<Session, Session>
 {
     public RefreshTokenUseCase(IRefreshDataSource dataSource) : base(dataSource) { }
 
-    protected override ReturnSuccessOrError<Session> Process(Session data, IParametersReturnResult parameters)
+    protected override ReturnSuccessOrError<Session> Process(Session data, ParametersReturnResult parameters)
         => ReturnSuccessOrError<Session>.Ok(data);
 }
 
@@ -408,7 +399,7 @@ public class LogoutUseCase : UsecaseBaseCallData<Unit, Unit>
 {
     public LogoutUseCase(ILogoutDataSource dataSource) : base(dataSource) { }
 
-    protected override ReturnSuccessOrError<Unit> Process(Unit data, IParametersReturnResult parameters)
+    protected override ReturnSuccessOrError<Unit> Process(Unit data, ParametersReturnResult parameters)
         => ReturnSuccessOrError<Unit>.Ok(Unit.Value);
 }
 ```
@@ -556,7 +547,7 @@ A biblioteca enriquece automaticamente as mensagens de erro com códigos de rast
 | Exceção na busca de dados | `Cod. DataSourceCatch` | `IDataSource.CallAsync` lança exceção; capturada e enriquecida automaticamente. |
 | Exceção no processamento em background | `Cod. BackgroundCatch` | `Process` lança exceção dentro de `Task.Run`; capturada e enriquecida automaticamente. |
 
-Em todos os casos, o tipo concreto do `IAppError` é preservado via `WithMessage`, e a mensagem é enriquecida com o código de rastreio e o conteúdo da exceção.
+Em todos os casos, o tipo concreto do `AppError` é preservado via `WithMessage`, e a mensagem é enriquecida com o código de rastreio e o conteúdo da exceção.
 
 ---
 

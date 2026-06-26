@@ -21,7 +21,7 @@ A biblioteca substitui o padrão de `try/catch` espalhado por um fluxo previsív
 | Exceções de I/O (banco, HTTP) vazam para camadas superiores e quebram o fluxo de forma imprevisível | Toda operação retorna `ReturnSuccessOrError<TValue>`; exceções são capturadas e encapsuladas como erro tipado |
 | `try/catch` repetido e inconsistente em cada handler/controller/service | A classe base orquestra captura, enriquecimento e curto-circuito de erros uma única vez |
 | Processamento CPU-bound (parsing, agregação) bloqueia a thread de requisição ou a UI | Separação fetch/process: o processamento pesado pode ser delegado a `Task.Run` (thread pool) via flag opt-in |
-| Resultado de erro perde o tipo concreto ao subir pelas camadas | `IAppError.WithMessage` preserva o tipo concreto do erro ao enriquecer a mensagem |
+| Resultado de erro perde o tipo concreto ao subir pelas camadas | `AppError.WithMessage` preserva o tipo concreto do erro ao enriquecer a mensagem |
 | Esquecer de tratar o caso de erro é fácil e silencioso | Tipo selado + método `Match` exaustivo tornam o tratamento de erro obrigatório |
 
 ---
@@ -68,9 +68,9 @@ Desenvolvedores .NET (back-end com ASP.NET Core, serviços, workers, ou apps MAU
 
 - Tipo de resultado discriminado selado (`ReturnSuccessOrError<TValue>`) com subtipos `Success` e `Failure`.
 - Método `Match` e suporte a `switch` por padrão para consumo exaustivo.
-- Contrato de erro (`IAppError`) e implementação concreta (`ErrorGeneric`).
+- Contrato de erro (`AppError`) e implementação concreta (`ErrorGeneric`).
 - Códigos de rastreio centralizados em constantes (`ErrorCodes.DataSourceCatch` / `ErrorCodes.BackgroundCatch`).
-- Contrato de parâmetros (`IParametersReturnResult`) e implementação concreta (`NoParams`).
+- Contrato de parâmetros (`ParametersReturnResult`) e implementação concreta (`NoParams`).
 - Contrato de fonte de dados (`IDataSource<TData>`).
 - Classes base de caso de uso: lógica pura e lógica com fonte de dados.
 - Orquestração fetch → curto-circuito → process.
@@ -96,14 +96,14 @@ Desenvolvedores .NET (back-end com ASP.NET Core, serviços, workers, ou apps MAU
 ```
 ReturnSuccessOrError<TValue>            (abstract record, selado por construtor privado)
 ├── Success(TValue Value)              (sealed record aninhado)
-└── Failure(IAppError Error)           (sealed record aninhado)
+└── Failure(AppError Error)           (sealed record aninhado)
 
-IAppError                              (interface)
+AppError                              (interface)
 └── ErrorGeneric                       (sealed record)
 
 ErrorCodes                             (static class — constantes de rastreio)
 
-IParametersReturnResult                (interface)
+ParametersReturnResult                (interface)
 └── NoParams                           (sealed record)
 
 IDataSource<TData>                     (interface)
@@ -134,17 +134,17 @@ public abstract record ReturnSuccessOrError<TValue>
     /// <summary>Resultado bem-sucedido, carregando o valor de tipo <typeparamref name="TValue"/>.</summary>
     public sealed record Success(TValue Value) : ReturnSuccessOrError<TValue>;
 
-    /// <summary>Resultado com falha, carregando um <see cref="IAppError"/>.</summary>
-    public sealed record Failure(IAppError Error) : ReturnSuccessOrError<TValue>;
+    /// <summary>Resultado com falha, carregando um <see cref="AppError"/>.</summary>
+    public sealed record Failure(AppError Error) : ReturnSuccessOrError<TValue>;
 
     // Fábricas estáticas — leitura fluente e evitam repetir o genérico.
     public static ReturnSuccessOrError<TValue> Ok(TValue value) => new Success(value);
-    public static ReturnSuccessOrError<TValue> Err(IAppError error) => new Failure(error);
+    public static ReturnSuccessOrError<TValue> Err(AppError error) => new Failure(error);
 
     /// <summary>Consumo exaustivo: obriga tratar sucesso e erro; nunca cai no caso default.</summary>
     public TResult Match<TResult>(
         Func<TValue, TResult> onSuccess,
-        Func<IAppError, TResult> onError) => this switch
+        Func<AppError, TResult> onError) => this switch
     {
         Success success => onSuccess(success.Value),
         Failure failure => onError(failure.Error),
@@ -152,7 +152,7 @@ public abstract record ReturnSuccessOrError<TValue>
     };
 
     /// <summary>Variante sem retorno, para efeitos colaterais (logging, side effects).</summary>
-    public void Switch(Action<TValue> onSuccess, Action<IAppError> onError)
+    public void Switch(Action<TValue> onSuccess, Action<AppError> onError)
     {
         switch (this)
         {
@@ -182,21 +182,20 @@ string message = result switch
 
 > **Igualdade por valor:** por serem `record`s, `Success` e `Failure` recebem `Equals`/`GetHashCode`/`ToString` por valor automaticamente — equivalente ao comportamento esperado de uma união discriminada.
 
-### 5.3 `IAppError` — Contrato de Erro
+### 5.3 `AppError` — Contrato de Erro
+
+`AppError` é um **`abstract record`** (não interface): todo erro é, por contrato, um valor imutável com igualdade por valor. `WithMessage` é implementado **uma única vez** na base — o operador `with` usa o clone virtual sintetizado do `record`, que despacha para o subtipo real, preservando o tipo concreto e os campos extras. Subtipos não reimplementam nada.
 
 ```csharp
 namespace ReturnSuccessOrError;
 
-public interface IAppError
+public abstract record AppError(string Message)
 {
-    /// <summary>Descrição legível do erro.</summary>
-    string Message { get; }
-
     /// <summary>
-    /// Devolve uma nova instância com a mensagem substituída, preservando o
-    /// tipo concreto. Implementações baseadas em <c>record</c> usam <c>with</c>.
+    /// Devolve uma nova instância com a mensagem substituída, preservando o tipo
+    /// concreto e os demais campos. Implementado uma vez aqui via clone virtual do record.
     /// </summary>
-    IAppError WithMessage(string message);
+    public AppError WithMessage(string message) => this with { Message = message };
 }
 ```
 
@@ -205,10 +204,8 @@ public interface IAppError
 ```csharp
 namespace ReturnSuccessOrError;
 
-public sealed record ErrorGeneric(string Message) : IAppError
+public sealed record ErrorGeneric(string Message) : AppError(Message)
 {
-    public IAppError WithMessage(string message) => this with { Message = message };
-
     public override string ToString() => $"{nameof(ErrorGeneric)} - {Message}";
 }
 ```
@@ -216,12 +213,11 @@ public sealed record ErrorGeneric(string Message) : IAppError
 **Erro de domínio customizado (exemplo de uso pelo consumidor):**
 
 ```csharp
-public sealed record ApiError(string Message, int StatusCode) : IAppError
-{
-    // O tipo concreto é preservado: WithMessage devolve ApiError, não IAppError genérico.
-    public IAppError WithMessage(string message) => this with { Message = message };
-}
+// Uma linha: herda WithMessage da base, ganha igualdade por valor e preserva StatusCode.
+public sealed record ApiError(string Message, int StatusCode) : AppError(Message);
 ```
+
+> **Por que `abstract record` e não `interface`?** O erro só carrega dados — não tem comportamento próprio além de `WithMessage`, que é idêntico para todos. Forçar `record` codifica a intenção ("erro é valor imutável") no tipo e elimina o boilerplate de reimplementar `WithMessage` em cada filho. Quem precisar de um erro que não seja `record` deve usar exceção, não este contrato.
 
 #### 5.3.1 `ErrorCodes` — Códigos de Rastreio (constantes)
 
@@ -232,7 +228,7 @@ namespace ReturnSuccessOrError;
 
 /// <summary>
 /// Códigos de rastreio anexados às mensagens de erro pela infraestrutura da
-/// biblioteca ao converter exceções em <see cref="IAppError"/>. Públicos para
+/// biblioteca ao converter exceções em <see cref="AppError"/>. Públicos para
 /// permitir asserções e filtros sem depender de strings literais.
 /// </summary>
 public static class ErrorCodes
@@ -247,16 +243,14 @@ public static class ErrorCodes
 
 > A mensagem final fica, por exemplo: `Falha ao buscar vendas - Cod. DataSourceCatch --- Catch: System.InvalidOperationException: ...`. O prefixo `Cod.` é mantido por legibilidade; o token após ele é sempre uma constante de `ErrorCodes`.
 
-### 5.4 `IParametersReturnResult` — Contrato de Parâmetros
+### 5.4 `ParametersReturnResult` — Contrato de Parâmetros
+
+Como `AppError`, `ParametersReturnResult` é um **`abstract record`**: parâmetros são valores imutáveis que apenas carregam dados (incluindo o `AppError` a usar em caso de falha). Subtipos passam o erro à base via `: ParametersReturnResult(Error)`.
 
 ```csharp
 namespace ReturnSuccessOrError;
 
-public interface IParametersReturnResult
-{
-    /// <summary>Erro a ser usado caso a operação falhe.</summary>
-    IAppError Error { get; }
-}
+public abstract record ParametersReturnResult(AppError Error);
 ```
 
 **Implementação concreta `NoParams`:**
@@ -264,13 +258,19 @@ public interface IParametersReturnResult
 ```csharp
 namespace ReturnSuccessOrError;
 
-public sealed record NoParams(IAppError? Error = null) : IParametersReturnResult
+public sealed record NoParams : ParametersReturnResult
 {
-    // Implementação explícita de interface: garante Error não-nulo sem
-    // alterar a semântica nullable do parâmetro posicional do record.
-    IAppError IParametersReturnResult.Error =>
-        Error ?? new ErrorGeneric("NoParams: unspecified generic error");
+    // Sem erro informado, fornece um ErrorGeneric default não-nulo à base.
+    public NoParams(AppError? error = null)
+        : base(error ?? new ErrorGeneric("NoParams: unspecified generic error")) { }
 }
+```
+
+**Parâmetro customizado (exemplo de uso pelo consumidor):**
+
+```csharp
+// Campo próprio (N) + o Error exigido pela base.
+public sealed record FibonacciParameters(int N, AppError Error) : ParametersReturnResult(Error);
 ```
 
 ### 5.5 `IDataSource<TData>` — Contrato de Fonte de Dados
@@ -282,10 +282,10 @@ public interface IDataSource<TData>
 {
     /// <summary>
     /// Executa a chamada externa e devolve o dado bruto, ou lança o
-    /// <see cref="IAppError"/> dos parâmetros (como exceção) em caso de falha.
+    /// <see cref="AppError"/> dos parâmetros (como exceção) em caso de falha.
     /// </summary>
     Task<TData> CallAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken = default);
 }
 ```
@@ -311,10 +311,10 @@ public abstract class UsecaseBase<TValue>
 
     /// <summary>Regra de negócio implementada pela subclasse.</summary>
     protected abstract ReturnSuccessOrError<TValue> Process(
-        IParametersReturnResult parameters);
+        ParametersReturnResult parameters);
 
     public async Task<ReturnSuccessOrError<TValue>> CallAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken = default)
     {
         if (!MonitorExecutionTime)
@@ -327,7 +327,7 @@ public abstract class UsecaseBase<TValue>
     }
 
     private Task<ReturnSuccessOrError<TValue>> RunStageAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken)
     {
         if (!RunInBackground)
@@ -376,10 +376,10 @@ public abstract class UsecaseBaseCallData<TValue, TData>
     /// <summary>Regra de negócio: recebe o dado bruto já carregado e os parâmetros.</summary>
     protected abstract ReturnSuccessOrError<TValue> Process(
         TData data,
-        IParametersReturnResult parameters);
+        ParametersReturnResult parameters);
 
     public async Task<ReturnSuccessOrError<TValue>> CallAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken = default)
     {
         if (!MonitorExecutionTime)
@@ -392,7 +392,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
     }
 
     private async Task<ReturnSuccessOrError<TValue>> RunAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken)
     {
         // FASE 1 — FETCH (no contexto da chamada; I/O-bound)
@@ -421,7 +421,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
     }
 
     private async Task<ReturnSuccessOrError<TData>> FetchAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken)
     {
         try
@@ -537,7 +537,7 @@ O fluxo fetch → process é um "trilho": se a busca falha, o processamento é p
 Diferente de abordagens baseadas em delegate/typedef, `Process` é um **método abstrato** sobrescrito pela subclasse — o idioma natural de polimorfismo em C#. Reduz boilerplate e é diretamente testável.
 
 ### 6.5 Implementação Explícita de Interface
-`NoParams` implementa `IParametersReturnResult.Error` explicitamente para fornecer um default não-nulo sem alterar a natureza nullable do parâmetro do `record`.
+`NoParams` implementa `ParametersReturnResult.Error` explicitamente para fornecer um default não-nulo sem alterar a natureza nullable do parâmetro do `record`.
 
 ### 6.6 Imutabilidade com `record` + `with`
 Erros e parâmetros são imutáveis. O enriquecimento de mensagem usa `with { Message = ... }`, preservando o tipo concreto — substitui o `copyWith` manual de outras linguagens.
@@ -558,7 +558,7 @@ Toda operação é assíncrona e cooperativamente cancelável, alinhada às conv
 | Exceção na busca de dados | `Cod. DataSourceCatch` | `IDataSource.CallAsync` lança; capturado em `FetchAsync` e enriquecido |
 | Exceção no processamento em background | `Cod. BackgroundCatch` | `Process` lança dentro de `Task.Run`; capturado e enriquecido |
 
-Em todos os casos de exceção, o **tipo concreto** do `IAppError` é preservado via `WithMessage`, e a mensagem é enriquecida com o código de rastreio e o conteúdo da exceção (`--- Catch: {ex}`).
+Em todos os casos de exceção, o **tipo concreto** do `AppError` é preservado via `WithMessage`, e a mensagem é enriquecida com o código de rastreio e o conteúdo da exceção (`--- Catch: {ex}`).
 
 ---
 
@@ -600,13 +600,13 @@ Em C#, polimorfismo por método sobrescrito é o caminho idiomático e gera o me
 ### 9.4 Por que `Failure` e não `Error` como nome do subtipo?
 `Error` colide semanticamente com `System.Error`/erros graves de runtime. `Failure` é mais claro e alinhado a bibliotecas funcionais consolidadas no ecossistema (`OneOf`, `ErrorOr`, `LanguageExt`).
 
-### 9.5 Por que `IAppError` e não usar `Exception` diretamente?
+### 9.5 Por que `AppError` e não usar `Exception` diretamente?
 Exceções são caras (captura de stack trace) e semanticamente representam fluxo excepcional. Aqui o erro é um **valor de domínio esperado** — modelá-lo como `record` imutável é mais barato e expressa melhor a intenção. A biblioteca só usa exceções na fronteira da fonte de dados, onde elas inevitavelmente ocorrem, convertendo-as imediatamente em valores.
 
 ### 9.6 Por que `WithMessage` na interface, se `record` já tem `with`?
-`with` exige conhecer o tipo concreto. Quando se tem apenas uma referência `IAppError`, `with` não está disponível. `WithMessage` é o ponto polimórfico que permite enriquecer a mensagem sem conhecer o tipo concreto, mantendo-o preservado.
+`with` exige conhecer o tipo concreto. Quando se tem apenas uma referência `AppError`, `with` não está disponível. `WithMessage` é o ponto polimórfico que permite enriquecer a mensagem sem conhecer o tipo concreto, mantendo-o preservado.
 
-### 9.7 Por que o erro mora dentro de `IParametersReturnResult`?
+### 9.7 Por que o erro mora dentro de `ParametersReturnResult`?
 Garante que o erro a ser retornado em caso de falha seja decidido **pelo chamador**, de forma tipada, antes da execução. Tanto a fonte de dados quanto o `Process` têm acesso a `parameters.Error` sem precisar fabricar erros em camadas internas.
 
 ### 9.8 Por que `RunInBackground` é `init` e não parâmetro de método?
@@ -651,7 +651,7 @@ Framework: **xUnit v3** + **NSubstitute** (mocking de `IDataSource<T>`) + **Shou
 | `ReturnSuccessOrError<T>` | acesso a `Success.Value`/`Failure.Error`, igualdade por valor, `Match`, `Switch`, exaustividade |
 | `UsecaseBase<T>` | execução direta, em background, `MonitorExecutionTime`, exceção → `Cod. BackgroundCatch`, resultado `Unit`/`Nil` |
 | `UsecaseBaseCallData<T,D>` | sucesso fetch+process, curto-circuito (process não chamado em falha de fetch), `Cod. DataSourceCatch`, paridade direto↔background, `CancellationToken` propagado |
-| `IAppError`/`ErrorGeneric` | comparação por valor, `WithMessage` preserva tipo concreto |
+| `AppError`/`ErrorGeneric` | comparação por valor, `WithMessage` preserva tipo concreto |
 | `NoParams` | erro default vs customizado |
 | `IDataSource<T>` | sucesso e exceção |
 

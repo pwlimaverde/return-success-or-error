@@ -25,11 +25,11 @@ ReturnSuccessOrError/
 │       │   ├── Unit.cs
 │       │   └── Nil.cs
 │       ├── Errors/
-│       │   ├── IAppError.cs
+│       │   ├── AppError.cs
 │       │   ├── ErrorGeneric.cs
 │       │   └── ErrorCodes.cs              # constantes de rastreio (DataSourceCatch/BackgroundCatch)
 │       ├── Parameters/
-│       │   ├── IParametersReturnResult.cs
+│       │   ├── ParametersReturnResult.cs
 │       │   └── NoParams.cs
 │       ├── DataSources/
 │       │   └── IDataSource.cs
@@ -195,14 +195,14 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 
 | # | Componente | Arquivo | Depende de |
 |---|---|---|---|
-| 1 | `IAppError` | `Errors/IAppError.cs` | — |
-| 2 | `ErrorGeneric` | `Errors/ErrorGeneric.cs` | `IAppError` |
+| 1 | `AppError` | `Errors/AppError.cs` | — |
+| 2 | `ErrorGeneric` | `Errors/ErrorGeneric.cs` | `AppError` |
 | 2b | `ErrorCodes` | `Errors/ErrorCodes.cs` | — |
-| 3 | `IParametersReturnResult` | `Parameters/IParametersReturnResult.cs` | `IAppError` |
-| 4 | `NoParams` | `Parameters/NoParams.cs` | `IParametersReturnResult`, `ErrorGeneric` |
+| 3 | `ParametersReturnResult` | `Parameters/ParametersReturnResult.cs` | `AppError` |
+| 4 | `NoParams` | `Parameters/NoParams.cs` | `ParametersReturnResult`, `ErrorGeneric` |
 | 5 | `Unit`, `Nil` | `Core/Unit.cs`, `Core/Nil.cs` | — |
-| 6 | `ReturnSuccessOrError<T>` | `Core/ReturnSuccessOrError.cs` | `IAppError` |
-| 7 | `IDataSource<T>` | `DataSources/IDataSource.cs` | `IParametersReturnResult` |
+| 6 | `ReturnSuccessOrError<T>` | `Core/ReturnSuccessOrError.cs` | `AppError` |
+| 7 | `IDataSource<T>` | `DataSources/IDataSource.cs` | `ParametersReturnResult` |
 | 8 | `UsecaseBase<T>` | `Usecases/UsecaseBase.cs` | itens 1–6 |
 | 9 | `UsecaseBaseCallData<T,D>` | `Usecases/UsecaseBaseCallData.cs` | itens 1–7 |
 | 10 | `IFeatureService` | `Features/IFeatureService.cs` | itens 1-6, 8-9 |
@@ -220,8 +220,8 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 | Caso de erro | `ReturnSuccessOrError<TValue>.Failure` | `sealed record`, `.Error` |
 | Fábricas | `.Ok(value)` / `.Err(error)` | estáticas |
 | Consumo | `.Match(onSuccess, onError)` / `switch` | exaustivo |
-| Erro | `IAppError` + `ErrorGeneric` | `WithMessage` preserva tipo |
-| Parâmetros | `IParametersReturnResult` + `NoParams` | expõem `Error` |
+| Erro | `AppError` + `ErrorGeneric` | `WithMessage` preserva tipo |
+| Parâmetros | `ParametersReturnResult` + `NoParams` | expõem `Error` |
 | Fonte de dados | `IDataSource<TData>` | `CallAsync(parameters, ct)` |
 | Caso de uso puro | `UsecaseBase<TValue>` | método abstrato `Process(parameters)` |
 | Caso de uso c/ dados | `UsecaseBaseCallData<TValue, TData>` | método abstrato `Process(data, parameters)` |
@@ -289,12 +289,12 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 ```csharp
 public class UsecaseBaseCallDataTests
 {
-    private sealed record TestParams(IAppError Error) : IParametersReturnResult;
+    private sealed record TestParams(AppError Error) : ParametersReturnResult(Error);
 
     private sealed class StringUsecase(IDataSource<int> ds, Action? onProcess = null)
         : UsecaseBaseCallData<string, int>(ds)
     {
-        protected override ReturnSuccessOrError<string> Process(int data, IParametersReturnResult p)
+        protected override ReturnSuccessOrError<string> Process(int data, ParametersReturnResult p)
         {
             onProcess?.Invoke();
             return ReturnSuccessOrError<string>.Ok($"valor: {data}");
@@ -306,7 +306,7 @@ public class UsecaseBaseCallDataTests
     {
         // Arrange
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .ThrowsAsync(new InvalidOperationException("db down"));
 
         var processChamado = false;
@@ -325,7 +325,7 @@ public class UsecaseBaseCallDataTests
     public async Task CallAsync_ComSucesso_ProcessaDadoDoFetch()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>())
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
           .Returns(42);
 
         var usecase = new StringUsecase(ds);
@@ -342,13 +342,13 @@ public class UsecaseBaseCallDataTests
     public async Task CallAsync_PropagaCancellationToken()
     {
         var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<IParametersReturnResult>(), Arg.Any<CancellationToken>()).Returns(1);
+        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>()).Returns(1);
         var usecase = new StringUsecase(ds);
         using var cts = new CancellationTokenSource();
 
         await usecase.CallAsync(new TestParams(new ErrorGeneric("x")), cts.Token);
 
-        await ds.Received(1).CallAsync(Arg.Any<IParametersReturnResult>(), cts.Token);
+        await ds.Received(1).CallAsync(Arg.Any<ParametersReturnResult>(), cts.Token);
     }
 }
 ```
@@ -373,7 +373,7 @@ Três features demonstrando os modos de uso, em um único Console App (`Program.
 public sealed class CheckConnectionUsecase(IDataSource<bool> ds)
     : UsecaseBaseCallData<string, bool>(ds)
 {
-    protected override ReturnSuccessOrError<string> Process(bool online, IParametersReturnResult p)
+    protected override ReturnSuccessOrError<string> Process(bool online, ParametersReturnResult p)
         => online
             ? ReturnSuccessOrError<string>.Ok("You are connected")
             : ReturnSuccessOrError<string>.Err(p.Error.WithMessage("You are offline"));
@@ -387,7 +387,7 @@ public sealed class CheckConnectionUsecase(IDataSource<bool> ds)
 ```csharp
 public sealed class FibonacciUsecase : UsecaseBase<long>
 {
-    protected override ReturnSuccessOrError<long> Process(IParametersReturnResult p)
+    protected override ReturnSuccessOrError<long> Process(ParametersReturnResult p)
     {
         var fp = (FibonacciParameters)p;
         if (fp.N < 0)
@@ -412,7 +412,7 @@ public sealed class GenerateSalesReportUsecase(IDataSource<IReadOnlyList<SalesRo
     : UsecaseBaseCallData<SalesReport, IReadOnlyList<SalesRow>>(ds)
 {
     protected override ReturnSuccessOrError<SalesReport> Process(
-        IReadOnlyList<SalesRow> rows, IParametersReturnResult p)
+        IReadOnlyList<SalesRow> rows, ParametersReturnResult p)
     {
         if (rows.Count == 0)
             return ReturnSuccessOrError<SalesReport>.Err(
@@ -585,8 +585,8 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 ### API
 - [ ] `ReturnSuccessOrError<T>` selado (construtor privado); `Success`/`Failure` aninhados.
 - [ ] `Match` e `Switch` exaustivos.
-- [ ] `IAppError.WithMessage` preserva tipo concreto (coberto por teste).
-- [ ] `IParametersReturnResult` + `NoParams` com erro default.
+- [ ] `AppError.WithMessage` preserva tipo concreto (coberto por teste).
+- [ ] `ParametersReturnResult` + `NoParams` com erro default.
 - [ ] `IDataSource<T>.CallAsync` com `CancellationToken`.
 - [ ] `UsecaseBase<T>` e `UsecaseBaseCallData<T,D>` com `Process` abstrato.
 - [ ] `ErrorCodes.DataSourceCatch` (fetch) e `ErrorCodes.BackgroundCatch` (process) cobertos por teste; códigos centralizados em constantes (sem literais mágicos).
@@ -615,7 +615,7 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 
 | Versão | Item | Justificativa |
 |---|---|---|
-| 1.1 | Conversões implícitas (`TValue` → `Success`, `IAppError` → `Failure`) | Reduz verbosidade na criação de resultados |
+| 1.1 | Conversões implícitas (`TValue` → `Success`, `AppError` → `Failure`) | Reduz verbosidade na criação de resultados |
 | 1.2 | Métodos de composição (`Map`, `Bind`/`Then`, `Ensure`) | Encadeamento estilo railway |
 | 1.3 | Injeção opcional de `ILogger<T>` para `MonitorExecutionTime` | Observabilidade estruturada em produção |
 | 1.4 | Multi-targeting `netstandard2.1` | Ampliar alcance a consumidores legados |

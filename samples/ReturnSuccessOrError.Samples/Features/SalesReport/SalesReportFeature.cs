@@ -11,7 +11,7 @@ public sealed record SalesReport(
     int TotalItems, decimal TotalRevenue, decimal AverageTicket, string TopProduct);
 
 /// <summary>Parâmetros da geração do relatório.</summary>
-public sealed record SalesReportParameters(int RowCount, IAppError Error) : IParametersReturnResult;
+public sealed record SalesReportParameters(int RowCount, AppError Error) : ParametersReturnResult(Error);
 
 /// <summary>Fonte de dados fake: gera <c>RowCount</c> linhas determinísticas de venda.</summary>
 public sealed class FakeSalesDataSource : IDataSource<IReadOnlyList<SalesRow>>
@@ -20,7 +20,7 @@ public sealed class FakeSalesDataSource : IDataSource<IReadOnlyList<SalesRow>>
         ["Mouse", "Teclado", "Monitor", "Headset", "Webcam"];
 
     public Task<IReadOnlyList<SalesRow>> CallAsync(
-        IParametersReturnResult parameters, CancellationToken cancellationToken = default)
+        ParametersReturnResult parameters, CancellationToken cancellationToken = default)
     {
         var p = (SalesReportParameters)parameters;
         var rows = new List<SalesRow>(p.RowCount);
@@ -41,7 +41,7 @@ public sealed class GenerateSalesReportUsecase(IDataSource<IReadOnlyList<SalesRo
     : UsecaseBaseCallData<SalesReport, IReadOnlyList<SalesRow>>(ds)
 {
     protected override ReturnSuccessOrError<SalesReport> Process(
-        IReadOnlyList<SalesRow> rows, IParametersReturnResult p)
+        IReadOnlyList<SalesRow> rows, ParametersReturnResult p)
     {
         if (rows.Count == 0)
             return ReturnSuccessOrError<SalesReport>.Err(

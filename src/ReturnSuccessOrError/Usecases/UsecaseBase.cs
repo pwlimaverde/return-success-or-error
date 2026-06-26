@@ -18,11 +18,11 @@ public abstract class UsecaseBase<TValue>
 
     /// <summary>Regra de negócio implementada pela subclasse.</summary>
     protected abstract ReturnSuccessOrError<TValue> Process(
-        IParametersReturnResult parameters);
+        ParametersReturnResult parameters);
 
     /// <summary>Executa o caso de uso.</summary>
     public async Task<ReturnSuccessOrError<TValue>> CallAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken = default)
     {
         if (!MonitorExecutionTime)
@@ -35,7 +35,7 @@ public abstract class UsecaseBase<TValue>
     }
 
     private Task<ReturnSuccessOrError<TValue>> RunStageAsync(
-        IParametersReturnResult parameters,
+        ParametersReturnResult parameters,
         CancellationToken cancellationToken)
     {
         if (!RunInBackground)

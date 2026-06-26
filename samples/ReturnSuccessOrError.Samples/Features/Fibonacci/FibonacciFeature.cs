@@ -4,7 +4,7 @@ using ReturnSuccessOrError.Samples.Composition;
 namespace ReturnSuccessOrError.Samples.Features.Fibonacci;
 
 /// <summary>Parâmetros do cálculo de Fibonacci.</summary>
-public sealed record FibonacciParameters(int N, IAppError Error) : IParametersReturnResult;
+public sealed record FibonacciParameters(int N, AppError Error) : ParametersReturnResult(Error);
 
 /// <summary>
 /// Caso de uso de lógica pura (sem fonte de dados). Cálculo recursivo CPU-bound, ideal para
@@ -12,7 +12,7 @@ public sealed record FibonacciParameters(int N, IAppError Error) : IParametersRe
 /// </summary>
 public sealed class FibonacciUsecase : UsecaseBase<long>
 {
-    protected override ReturnSuccessOrError<long> Process(IParametersReturnResult p)
+    protected override ReturnSuccessOrError<long> Process(ParametersReturnResult p)
     {
         var fp = (FibonacciParameters)p;
         if (fp.N < 0)

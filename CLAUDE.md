@@ -40,7 +40,7 @@ Publicação é automática via tag `vX.Y.Z` (GitHub Actions, ver DEVELOPMENT_PL
 
 A biblioteca gira em torno de uma **união discriminada selada** e duas **classes base de caso de uso** que orquestram o fluxo. O desenvolvedor que consome a lib escreve apenas a regra de negócio (`Process`).
 
-**Tipo central — `ReturnSuccessOrError<TValue>`:** `abstract record` com **construtor privado** (fecha a hierarquia) e dois `sealed record` aninhados, `Success(TValue Value)` e `Failure(IAppError Error)`. Consumo via `.Match(onSuccess, onError)` (exaustivo) ou `switch`. Fábricas: `.Ok(value)` / `.Err(error)`.
+**Tipo central — `ReturnSuccessOrError<TValue>`:** `abstract record` com **construtor privado** (fecha a hierarquia) e dois `sealed record` aninhados, `Success(TValue Value)` e `Failure(AppError Error)`. Consumo via `.Match(onSuccess, onError)` (exaustivo) ou `switch`. Fábricas: `.Ok(value)` / `.Err(error)`.
 
 **Fluxo do `UsecaseBaseCallData<TValue, TData>` (3 fases) — o conceito mais importante:**
 1. **FETCH** — `await IDataSource<TData>.CallAsync(...)` no contexto da chamada (I/O-bound; nunca vai para background). Exceção aqui é capturada e vira `Failure` com código `ErrorCodes.DataSourceCatch`.
@@ -54,8 +54,9 @@ A biblioteca gira em torno de uma **união discriminada selada** e duas **classe
 **Decisões de design que atravessam vários arquivos:**
 - **`Process` é método abstrato** (não delegate/typedef). Como `Task.Run` compartilha memória — diferente dos isolates do Dart original — não há restrição de "função estática". Boa prática: não acessar a fonte de dados dentro de `Process`.
 - **`RunInBackground` afeta SOMENTE o processamento.** A busca de dados (I/O) jamais vai para o thread pool — despachar I/O assíncrono ao pool é desperdício.
-- **Erros são valores, não exceções.** `IAppError` é um `record` imutável. Exceções só existem na fronteira da fonte de dados e são convertidas em `Failure` imediatamente. `IAppError.WithMessage(...)` enriquece a mensagem **preservando o tipo concreto** (`ApiError` continua `ApiError`) — é o ponto polimórfico que `record with {}` não cobre quando se tem só uma referência `IAppError`.
-- **O erro mora nos parâmetros.** `IParametersReturnResult.Error` é decidido pelo chamador antes da execução; fetch e process o acessam via `parameters.Error` sem fabricar erros em camadas internas.
+- **Erros são valores, não exceções.** `AppError` é um **`abstract record`** (não interface) — todo erro é, por contrato, um valor imutável. Exceções só existem na fronteira da fonte de dados e são convertidas em `Failure` imediatamente. `AppError.WithMessage(...)` enriquece a mensagem **preservando o tipo concreto** (`ApiError` continua `ApiError`): é implementado **uma única vez** na base via o clone virtual do `record` (`this with {}`), que despacha para o subtipo real. Quem precisar de um erro que não seja `record` usa exceção, não este contrato.
+- **Parâmetros também são `record`.** `ParametersReturnResult` é um **`abstract record`** pela mesma razão — só carrega dados. O `Error` é decidido pelo chamador antes da execução; fetch e process o acessam via `parameters.Error`. Subtipos passam o erro à base via `: ParametersReturnResult(Error)`.
+- **Distinção dados × serviço:** contratos que só carregam dados (`AppError`, `ParametersReturnResult`) são `abstract record`; contratos de serviço/comportamento (`IDataSource<T>`, `IFeatureService`) seguem `interface`.
 - **`Unit` (operação sem valor) e `Nil` (null semântico)** são singletons distintos — `void` não é argumento genérico válido em C#.
 - **`Failure`**, não `Error`, para o subtipo de falha (evita colisão com `System` e alinha a `OneOf`/`ErrorOr`).
 - **`CancellationToken`** percorre toda a cadeia async (adição idiomática .NET, ausente no original Dart).

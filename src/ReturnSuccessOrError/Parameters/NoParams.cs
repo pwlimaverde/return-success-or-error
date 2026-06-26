@@ -2,12 +2,11 @@ namespace ReturnSuccessOrError;
 
 /// <summary>
 /// Parâmetros vazios, para casos de uso que não exigem entrada. Fornece um
-/// <see cref="IAppError"/> default não-nulo quando nenhum erro é especificado.
+/// <see cref="AppError"/> default não-nulo quando nenhum erro é especificado.
 /// </summary>
-public sealed record NoParams(IAppError? Error = null) : IParametersReturnResult
+public sealed record NoParams : ParametersReturnResult
 {
-    // Implementação explícita de interface: garante Error não-nulo sem
-    // alterar a semântica nullable do parâmetro posicional do record.
-    IAppError IParametersReturnResult.Error =>
-        Error ?? new ErrorGeneric("NoParams: unspecified generic error");
+    /// <summary>Cria parâmetros vazios; sem erro informado, usa um <see cref="ErrorGeneric"/> default.</summary>
+    public NoParams(AppError? error = null)
+        : base(error ?? new ErrorGeneric("NoParams: unspecified generic error")) { }
 }

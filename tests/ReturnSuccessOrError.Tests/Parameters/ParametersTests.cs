@@ -9,7 +9,7 @@ public class ParametersTests
     [Fact]
     public void NoParams_SemErro_ExpoeErrorGenericDefault()
     {
-        IParametersReturnResult p = new NoParams();
+        ParametersReturnResult p = new NoParams();
 
         var error = p.Error;
 
@@ -21,7 +21,7 @@ public class ParametersTests
     public void NoParams_ComErroCustomizado_ExpoeOErroFornecido()
     {
         var custom = new ErrorGeneric("erro específico");
-        IParametersReturnResult p = new NoParams(custom);
+        ParametersReturnResult p = new NoParams(custom);
 
         p.Error.ShouldBeSameAs(custom);
     }

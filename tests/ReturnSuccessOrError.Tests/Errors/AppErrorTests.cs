@@ -6,11 +6,9 @@ namespace ReturnSuccessOrError.Tests.Errors;
 
 public class AppErrorTests
 {
-    // Erro de domínio customizado: exercita a preservação de tipo concreto em WithMessage.
-    private sealed record ApiError(string Message, int StatusCode) : IAppError
-    {
-        public IAppError WithMessage(string message) => this with { Message = message };
-    }
+    // Erro de domínio customizado: exercita a preservação de tipo concreto em WithMessage
+    // (herdado da base AppError — não reimplementado).
+    private sealed record ApiError(string Message, int StatusCode) : AppError(Message);
 
     [Fact]
     public void ErrorGeneric_TemIgualdadePorValor()
@@ -28,7 +26,7 @@ public class AppErrorTests
     [Fact]
     public void WithMessage_EmErrorGeneric_DevolveErrorGenericComNovaMensagem()
     {
-        IAppError original = new ErrorGeneric("antiga");
+        AppError original = new ErrorGeneric("antiga");
 
         var enriched = original.WithMessage("nova");
 
@@ -39,7 +37,7 @@ public class AppErrorTests
     [Fact]
     public void WithMessage_EmErroCustomizado_PreservaTipoConcretoEDemaisCampos()
     {
-        IAppError original = new ApiError("não encontrado", 404);
+        AppError original = new ApiError("não encontrado", 404);
 
         var enriched = original.WithMessage("recurso ausente");
 
