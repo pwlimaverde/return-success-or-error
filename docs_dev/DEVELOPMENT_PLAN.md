@@ -1,7 +1,7 @@
 # Plano de Desenvolvimento — ReturnSuccessOrError (.NET)
 
 **Produto:** Biblioteca NuGet `ReturnSuccessOrError`
-**Alvo:** .NET 10 (LTS) / C# 14
+**Alvo:** .NET 11 / C# 15 (preview)
 **Objetivo:** Desenvolver e publicar uma biblioteca de domínio para o ecossistema .NET, implementando um result type discriminado e bases de caso de uso para Clean Architecture.
 **Documento de referência:** `docs_dev/PRD.md`
 **Data:** 2026-06-22
@@ -75,8 +75,9 @@ ReturnSuccessOrError/
 ```xml
 <Project>
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <LangVersion>14</LangVersion>
+    <TargetFramework>net11.0</TargetFramework>
+    <!-- C# 15 ainda sem número próprio no SDK 11 preview; usa-se 'preview'. -->
+    <LangVersion>preview</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -169,7 +170,7 @@ ReturnSuccessOrError/
 </Project>
 ```
 
-> **Versões dos pacotes:** os `N.*` acima fixam a **major** desejada; confirme a major estável atual de `xunit.v3`, `xunit.runner.visualstudio`, `Shouldly`, `MinVer` e `coverlet.collector` no NuGet.org ao criar os projetos (evoluem com frequência). O alvo `net10.0` e `LangVersion 14` (C# 14) já são o stack mais recente e não mudam.
+> **Versões dos pacotes:** os `N.*` acima fixam a **major** desejada; confirme a major estável atual de `xunit.v3`, `xunit.runner.visualstudio`, `Shouldly`, `MinVer` e `coverlet.collector` no NuGet.org ao criar os projetos (evoluem com frequência). O alvo `net11.0` e `LangVersion preview` (C# 15) são o stack mais recente; enquanto o .NET 11/C# 15 estiverem em preview, o SDK é fixado por `global.json`.
 
 ### 2.4 `samples/ReturnSuccessOrError.Samples/ReturnSuccessOrError.Samples.csproj`
 
@@ -605,7 +606,7 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 - [ ] Instalação testada em projeto consumidor separado.
 
 ### Compatibilidade
-- [ ] Compila e roda em `net10.0`.
+- [ ] Compila e roda em `net11.0`.
 - [ ] Verificado AOT-friendly (sem reflexão; `IsAotCompatible=true`).
 - [ ] Publicação AOT de um app consumidor sem warnings de trimming/AOT.
 

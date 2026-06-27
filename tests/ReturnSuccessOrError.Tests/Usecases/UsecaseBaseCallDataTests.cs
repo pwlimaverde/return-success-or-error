@@ -59,7 +59,7 @@ public class UsecaseBaseCallDataTests
 
         var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha")));
 
-        var failure = result.ShouldBeOfType<ReturnSuccessOrError<string>.Failure>();
+        var failure = result.ShouldBeFailure();
         failure.Error.Message.ShouldContain(ErrorCodes.DataSourceCatch);
         processChamado.ShouldBeFalse(); // curto-circuito: Process não é chamado
     }
@@ -75,7 +75,7 @@ public class UsecaseBaseCallDataTests
 
         var result = await usecase.CallAsync(new TestParams(new ApiError("falha api", 503)));
 
-        var failure = result.ShouldBeOfType<ReturnSuccessOrError<string>.Failure>();
+        var failure = result.ShouldBeFailure();
         var api = failure.Error.ShouldBeOfType<ApiError>();
         api.StatusCode.ShouldBe(503);
         api.Message.ShouldContain(ErrorCodes.DataSourceCatch);
@@ -92,7 +92,7 @@ public class UsecaseBaseCallDataTests
 
         var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha base")));
 
-        var failure = result.ShouldBeOfType<ReturnSuccessOrError<string>.Failure>();
+        var failure = result.ShouldBeFailure();
         failure.Error.Message.ShouldContain(ErrorCodes.BackgroundCatch);
         failure.Error.Message.ShouldContain("process-boom");
     }
@@ -140,7 +140,7 @@ public class UsecaseBaseCallDataTests
 
         var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("e")));
 
-        result.ShouldBeOfType<ReturnSuccessOrError<string>.Success>().Value.ShouldBe("valor: 42");
+        result.ShouldBeSuccess().Value.ShouldBe("valor: 42");
     }
 
     [Fact]

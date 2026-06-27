@@ -45,7 +45,7 @@ public class UsecaseBaseTests
 
         var result = await usecase.CallAsync(new NumberParams(21, new ErrorGeneric("e")));
 
-        result.ShouldBeOfType<ReturnSuccessOrError<int>.Success>().Value.ShouldBe(42);
+        result.ShouldBeSuccess().Value.ShouldBe(42);
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class UsecaseBaseTests
 
         var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha base")));
 
-        var failure = result.ShouldBeOfType<ReturnSuccessOrError<int>.Failure>();
+        var failure = result.ShouldBeFailure();
         failure.Error.Message.ShouldContain(ErrorCodes.BackgroundCatch);
         failure.Error.Message.ShouldContain("kaboom");
     }
@@ -91,7 +91,7 @@ public class UsecaseBaseTests
 
         var result = await usecase.CallAsync(new NumberParams(5, new ErrorGeneric("e")));
 
-        result.ShouldBeOfType<ReturnSuccessOrError<int>.Success>().Value.ShouldBe(10);
+        result.ShouldBeSuccess().Value.ShouldBe(10);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class UsecaseBaseTests
     {
         var result = await new UnitUsecase().CallAsync(new TestParams(new ErrorGeneric("e")));
 
-        result.ShouldBeOfType<ReturnSuccessOrError<Unit>.Success>().Value.ShouldBeSameAs(Unit.Value);
+        result.ShouldBeSuccess().Value.ShouldBeSameAs(Unit.Value);
     }
 
     [Fact]
@@ -107,6 +107,6 @@ public class UsecaseBaseTests
     {
         var result = await new NilUsecase().CallAsync(new TestParams(new ErrorGeneric("e")));
 
-        result.ShouldBeOfType<ReturnSuccessOrError<Nil>.Success>().Value.ShouldBeSameAs(Nil.Value);
+        result.ShouldBeSuccess().Value.ShouldBeSameAs(Nil.Value);
     }
 }

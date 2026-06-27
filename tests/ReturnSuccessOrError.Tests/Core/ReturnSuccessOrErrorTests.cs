@@ -11,7 +11,7 @@ public class ReturnSuccessOrErrorTests
     {
         var result = ReturnSuccessOrError<int>.Ok(42);
 
-        var success = result.ShouldBeOfType<ReturnSuccessOrError<int>.Success>();
+        var success = result.ShouldBeSuccess();
         success.Value.ShouldBe(42);
     }
 
@@ -22,7 +22,7 @@ public class ReturnSuccessOrErrorTests
 
         var result = ReturnSuccessOrError<int>.Err(error);
 
-        var failure = result.ShouldBeOfType<ReturnSuccessOrError<int>.Failure>();
+        var failure = result.ShouldBeFailure();
         failure.Error.ShouldBe(error);
     }
 
@@ -109,15 +109,12 @@ public class ReturnSuccessOrErrorTests
     {
         ReturnSuccessOrError<string> result = ReturnSuccessOrError<string>.Ok("v");
 
-        // CS8509: o compilador não prova exaustividade de uma união fechada por
-        // construtor privado (comportamento esperado, PRD §5.2). Dois braços bastam.
-#pragma warning disable CS8509
+        // union (C# 15): o compilador PROVA a exaustividade — dois braços, sem caso default.
         var text = result switch
         {
-            ReturnSuccessOrError<string>.Success(var value) => $"S:{value}",
-            ReturnSuccessOrError<string>.Failure(var error) => $"F:{error.Message}",
+            Success<string>(var value) => $"S:{value}",
+            Failure(var error) => $"F:{error.Message}",
         };
-#pragma warning restore CS8509
 
         text.ShouldBe("S:v");
     }

@@ -7,15 +7,28 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+### Alterado
+
+- **Tipo central migrado para `union` nativo do C# 15.** `ReturnSuccessOrError<TValue>` deixa de
+  ser um `abstract record` com construtor privado e casos aninhados, passando a
+  `public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)` sobre os
+  `sealed record` **top-level** `Success<TValue>` e `Failure`. O compilador prova a exaustividade
+  (sem caso default). Adicionada conversão implícita de `TValue` (`return value;`).
+- **Alvo `net11.0` + C# 15 (`LangVersion preview`).** Requer o SDK do .NET 11 (fixado em
+  `global.json`). Publicação estável aguarda o GA do .NET 11 (nov/2026).
+
+> Nota: como o `union` é um struct wrapper, `GetType()` devolve o tipo do union (não do caso);
+> verifique o caso por pattern matching (`is Success<T>`/`is Failure`), não por `GetType()`.
+
 ## [1.0.0] - 2026-06-23
 
-Primeira versão estável. Biblioteca de domínio para Clean Architecture em .NET 10,
+Primeira versão (em .NET 11 preview). Biblioteca de domínio para Clean Architecture,
 com result type discriminado e bases de caso de uso. Zero dependências de runtime; AOT-friendly.
 
 ### Adicionado
 
-- **`ReturnSuccessOrError<TValue>`** — união discriminada selada (`abstract record` com
-  construtor privado) com os casos aninhados `Success` e `Failure`. Fábricas `Ok`/`Err`,
+- **`ReturnSuccessOrError<TValue>`** — união discriminada (`union` do C# 15) com os casos
+  top-level `Success<TValue>` e `Failure`. Fábricas `Ok`/`Err`, conversão implícita de `TValue`,
   consumo exaustivo via `Match` (com retorno) e `Switch` (efeitos colaterais).
 - **`AppError`** (`abstract record`) + **`ErrorGeneric`** — erro de domínio como valor imutável;
   `WithMessage` (implementado uma vez na base, via clone virtual do `record`) enriquece a mensagem

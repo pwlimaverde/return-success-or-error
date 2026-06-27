@@ -13,7 +13,8 @@ jobs:
           fetch-depth: 0          # MinVer deriva a versão da tag vX.Y.Z deste checkout
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
+          dotnet-quality: 'preview'   # .NET 11/C# 15 ainda em preview
           cache: true
           cache-dependency-path: '**/packages.lock.json'
       - run: dotnet restore

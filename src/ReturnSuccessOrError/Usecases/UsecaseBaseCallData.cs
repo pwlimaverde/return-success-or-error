@@ -52,16 +52,26 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         // FASE 1 — FETCH (no contexto da chamada; I/O-bound)
         var fetchResult = await FetchAsync(parameters, cancellationToken).ConfigureAwait(false);
 
-        // FASE 2 — CURTO-CIRCUITO no erro
-        if (fetchResult is ReturnSuccessOrError<TData>.Failure failure)
-            return ReturnSuccessOrError<TValue>.Err(failure.Error);
+        // FASE 2 — CURTO-CIRCUITO: se falhou, propaga o erro (Failure flui entre genéricos);
+        //          senão, segue para a FASE 3 — PROCESS. O switch é exaustivo (união fechada).
+        return fetchResult switch
+        {
+            Failure failure => failure,
+            Success<TData> success =>
+                await ProcessStageAsync(success.Value, parameters, cancellationToken).ConfigureAwait(false),
+        };
+    }
 
-        var data = ((ReturnSuccessOrError<TData>.Success)fetchResult).Value;
-
-        // FASE 3 — PROCESS (direto ou em background; CPU-bound)
+    private async Task<ReturnSuccessOrError<TValue>> ProcessStageAsync(
+        TData data,
+        ParametersReturnResult parameters,
+        CancellationToken cancellationToken)
+    {
+        // PROCESS direto (CPU-bound na thread chamadora)...
         if (!RunInBackground)
             return Process(data, parameters);
 
+        // ...ou despachado ao thread pool. Só o background converte exceção em Failure.
         return await Task.Run(() =>
         {
             try { return Process(data, parameters); }

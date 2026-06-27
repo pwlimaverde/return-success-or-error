@@ -1,7 +1,7 @@
 # PRD — ReturnSuccessOrError (.NET)
 
 **Produto:** Biblioteca NuGet `ReturnSuccessOrError`
-**Plataforma-alvo:** .NET 10 (LTS) / C# 14 (com suporte a `netstandard2.1` em avaliação)
+**Plataforma-alvo:** .NET 11 / C# 15 — _preview_ (com suporte a `netstandard2.1` em avaliação)
 **Tipo:** Biblioteca de domínio (class library), zero dependências de runtime
 **Licença:** MIT
 **Data:** 2026-06-22
@@ -673,7 +673,7 @@ Detalhamento completo no documento `DEVELOPMENT_PLAN.md`.
 
 ## 13. Requisitos Não-Funcionais
 
-- **Compatibilidade:** `net10.0` (alvo principal, LTS). Avaliar multi-targeting com `netstandard2.1` para ampliar alcance, condicionado ao uso de `record`/pattern matching disponíveis.
+- **Compatibilidade:** `net11.0` (alvo principal; STS/preview no momento). Avaliar multi-targeting com `netstandard2.1` para ampliar alcance, condicionado ao uso de `record`/pattern matching disponíveis.
 - **Nullable reference types:** habilitado e sem warnings.
 - **Warnings como erros:** `TreatWarningsAsErrors=true`.
 - **Documentação XML:** gerada (`GenerateDocumentationFile=true`) para IntelliSense no consumidor.

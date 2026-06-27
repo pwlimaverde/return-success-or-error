@@ -1,12 +1,12 @@
 {
   "version": 1,
   "dependencies": {
-    "net10.0": {
+    "net11.0": {
       "Microsoft.NET.ILLink.Tasks": {
         "type": "Direct",
-        "requested": "[10.0.9, )",
-        "resolved": "10.0.9",
-        "contentHash": "4Iw41e2h7I4t70SJcX2GCmbyKJIlA273Cfm9RJMM050/3VBejGAG1KcthP5Z2L6SQcbfbf6BhNWO26+ZG+GzMg=="
+        "requested": "[11.0.0-preview.5.26302.115, )",
+        "resolved": "11.0.0-preview.5.26302.115",
+        "contentHash": "39n/vnh6KmIMvjRhJywLRRLZYDA+3TrC8i9QUjUyL+XjKu8U3ON/zXFQUS/UHibZikJHpWMkinx8KkzlkugCvA=="
       },
       "MinVer": {
         "type": "Direct",

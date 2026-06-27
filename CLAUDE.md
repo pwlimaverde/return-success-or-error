@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Estado do repositório
 
-**Implementado — biblioteca completa e testada, preparando a release v1.0.0.** A solution (`net10.0`) tem a lib, testes e samples funcionando; 36 testes verdes (~98% de cobertura); pacote validado com `dotnet-validate` (zero dependências de runtime). Falta apenas a publicação no NuGet (tag git `v1.0.0`).
+**Implementado — biblioteca completa e testada.** A solution (`net11.0`, C# 15 em _preview_) tem a lib, testes e samples funcionando; 36 testes verdes; zero dependências de runtime. O tipo central usa `union` **nativo** do C# 15. **Publicação estável aguarda o GA do .NET 11 (nov/2026)** — o alvo é um framework preview e não deve ir ao NuGet como release estável até lá. Build/test exigem o SDK 11 (fixado em `global.json`).
 
 Documentação de referência:
 
@@ -20,7 +20,7 @@ Idioma: toda comunicação e documentação em **português (pt-br)**. Identific
 
 ## O que está sendo construído
 
-`ReturnSuccessOrError` — biblioteca NuGet (.NET 10 LTS / C# 14) para a camada de domínio em Clean Architecture. É inspirada no package Dart homônimo (`C:\PROJETOS\FLUTTER\PACKAGES\return_success_or_error`), mas é um produto **nativo .NET** — não um porte literal. Zero dependências de runtime; AOT-friendly.
+`ReturnSuccessOrError` — biblioteca NuGet (.NET 11 / C# 15) para a camada de domínio em Clean Architecture. **Nota:** o .NET 11 e o C# 15 ainda estão em _preview_ (STS); o SDK é fixado via `global.json` e o `LangVersion` é `preview` (o C# 15 não tem número próprio no SDK ainda). É inspirada no package Dart homônimo (`C:\PROJETOS\FLUTTER\PACKAGES\return_success_or_error`), mas é um produto **nativo .NET** — não um porte literal. Zero dependências de runtime; AOT-friendly.
 
 ## Comandos (após a estrutura existir — ver DEVELOPMENT_PLAN seção 2)
 
@@ -40,7 +40,7 @@ Publicação é automática via tag `vX.Y.Z` (GitHub Actions, ver DEVELOPMENT_PL
 
 A biblioteca gira em torno de uma **união discriminada selada** e duas **classes base de caso de uso** que orquestram o fluxo. O desenvolvedor que consome a lib escreve apenas a regra de negócio (`Process`).
 
-**Tipo central — `ReturnSuccessOrError<TValue>`:** `abstract record` com **construtor privado** (fecha a hierarquia) e dois `sealed record` aninhados, `Success(TValue Value)` e `Failure(AppError Error)`. Consumo via `.Match(onSuccess, onError)` (exaustivo) ou `switch`. Fábricas: `.Ok(value)` / `.Err(error)`.
+**Tipo central — `ReturnSuccessOrError<TValue>`:** `union` **nativo** do C# 15 — `public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)` — sobre dois `sealed record` **top-level**, `Success<TValue>(TValue Value)` e `Failure(AppError Error)`. O compilador prova a exaustividade: `Match`/`switch` dispensam caso default. Fábricas `.Ok(value)`/`.Err(error)` e conversão implícita de `TValue` (`return value;`). **Pegadinha:** o union é um struct wrapper — `GetType()` devolve o tipo do union, não do caso; testes verificam o caso por pattern matching (`is Success<T>`/`is Failure`), via os helpers em `tests/ResultAssertions.cs`, não `ShouldBeOfType`.
 
 **Fluxo do `UsecaseBaseCallData<TValue, TData>` (3 fases) — o conceito mais importante:**
 1. **FETCH** — `await IDataSource<TData>.CallAsync(...)` no contexto da chamada (I/O-bound; nunca vai para background). Exceção aqui é capturada e vira `Failure` com código `ErrorCodes.DataSourceCatch`.
