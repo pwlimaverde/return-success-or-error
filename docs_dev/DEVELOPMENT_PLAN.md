@@ -216,11 +216,11 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 
 | Conceito | Nome em C# | Observação |
 |---|---|---|
-| Tipo de resultado | `ReturnSuccessOrError<TValue>` | `abstract record`, construtor privado |
-| Caso de sucesso | `ReturnSuccessOrError<TValue>.Success` | `sealed record`, `.Value` |
-| Caso de erro | `ReturnSuccessOrError<TValue>.Failure` | `sealed record`, `.Error` |
-| Fábricas | `.Ok(value)` / `.Err(error)` | estáticas |
-| Consumo | `.Match(onSuccess, onError)` / `switch` | exaustivo |
+| Tipo de resultado | `ReturnSuccessOrError<TValue>` | `readonly union` (C# 15) |
+| Caso de sucesso | `Success<TValue>` | `sealed record` top-level, `.Value` |
+| Caso de erro | `Failure` | `sealed record` top-level, `.Error` |
+| Fábricas | `.Ok(value)` / `.Err(error)` / `return value;` | estáticas + conversão implícita |
+| Consumo | `.Match(onSuccess, onError)` / `switch` | exaustivo (provado pelo compilador) |
 | Erro | `AppError` + `ErrorGeneric` | `WithMessage` preserva tipo |
 | Parâmetros | `ParametersReturnResult` + `NoParams` | expõem `Error` |
 | Fonte de dados | `IDataSource<TData>` | `CallAsync(parameters, ct)` |
@@ -316,8 +316,8 @@ public class UsecaseBaseCallDataTests
         // Act
         var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha")));
 
-        // Assert
-        var failure = result.ShouldBeOfType<ReturnSuccessOrError<string>.Failure>();
+        // Assert — union é struct wrapper: usar o helper (pattern matching), não ShouldBeOfType.
+        var failure = result.ShouldBeFailure();
         failure.Error.Message.ShouldContain(ErrorCodes.DataSourceCatch);
         processChamado.ShouldBeFalse();
     }
@@ -584,8 +584,8 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 - [ ] Nullable reference types sem warnings.
 
 ### API
-- [ ] `ReturnSuccessOrError<T>` selado (construtor privado); `Success`/`Failure` aninhados.
-- [ ] `Match` e `Switch` exaustivos.
+- [ ] `ReturnSuccessOrError<T>` é `union` (C# 15); `Success<T>`/`Failure` top-level.
+- [ ] `Match` e `Switch` exaustivos (provados pelo compilador, sem caso default).
 - [ ] `AppError.WithMessage` preserva tipo concreto (coberto por teste).
 - [ ] `ParametersReturnResult` + `NoParams` com erro default.
 - [ ] `IDataSource<T>.CallAsync` com `CancellationToken`.

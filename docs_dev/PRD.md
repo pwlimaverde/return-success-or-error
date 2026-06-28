@@ -94,9 +94,9 @@ Desenvolvedores .NET (back-end com ASP.NET Core, serviços, workers, ou apps MAU
 ### 5.1 Hierarquia de Tipos
 
 ```
-ReturnSuccessOrError<TValue>            (abstract record, selado por construtor privado)
-├── Success(TValue Value)              (sealed record aninhado)
-└── Failure(AppError Error)           (sealed record aninhado)
+ReturnSuccessOrError<TValue>            (readonly union — C# 15)
+├── Success<TValue>(TValue Value)      (sealed record top-level)
+└── Failure(AppError Error)           (sealed record top-level)
 
 AppError                              (interface)
 └── ErrorGeneric                       (sealed record)
@@ -119,36 +119,33 @@ Nil                                    (sealed class — singleton)
 
 ### 5.2 `ReturnSuccessOrError<TValue>` — Tipo Central
 
-União discriminada implementada como `abstract record` com construtor privado, o que **fecha a hierarquia**: nenhum subtipo pode ser declarado fora da biblioteca. Os dois únicos casos são `record`s aninhados, permitindo desconstrução posicional e padrões de propriedade no `switch`.
+União discriminada implementada como **`union` nativo do C# 15** sobre dois `sealed record` **top-level**. O `union` **fecha a hierarquia** na linguagem: o compilador prova a exaustividade do `switch`/`Match` — não há caso default nem subtipo externo possível. Os casos são `record`s, permitindo desconstrução posicional e padrões de propriedade no `switch`.
 
 ```csharp
 namespace ReturnSuccessOrError;
 
-using System.Diagnostics;
+/// <summary>Resultado bem-sucedido, carregando o valor de tipo <typeparamref name="TValue"/>.</summary>
+public sealed record Success<TValue>(TValue Value);
 
-public abstract record ReturnSuccessOrError<TValue>
+/// <summary>Resultado com falha, carregando um <see cref="AppError"/>.</summary>
+public sealed record Failure(AppError Error);
+
+public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)
 {
-    // Construtor privado: impede subtipos externos — a união é fechada.
-    private ReturnSuccessOrError() { }
-
-    /// <summary>Resultado bem-sucedido, carregando o valor de tipo <typeparamref name="TValue"/>.</summary>
-    public sealed record Success(TValue Value) : ReturnSuccessOrError<TValue>;
-
-    /// <summary>Resultado com falha, carregando um <see cref="AppError"/>.</summary>
-    public sealed record Failure(AppError Error) : ReturnSuccessOrError<TValue>;
-
     // Fábricas estáticas — leitura fluente e evitam repetir o genérico.
-    public static ReturnSuccessOrError<TValue> Ok(TValue value) => new Success(value);
+    public static ReturnSuccessOrError<TValue> Ok(TValue value) => new Success<TValue>(value);
     public static ReturnSuccessOrError<TValue> Err(AppError error) => new Failure(error);
 
-    /// <summary>Consumo exaustivo: obriga tratar sucesso e erro; nunca cai no caso default.</summary>
+    // Açúcar: converte um valor de sucesso diretamente (ex.: return value;).
+    public static implicit operator ReturnSuccessOrError<TValue>(TValue value) => new Success<TValue>(value);
+
+    /// <summary>Consumo exaustivo: o compilador prova a exaustividade — sem caso default.</summary>
     public TResult Match<TResult>(
         Func<TValue, TResult> onSuccess,
         Func<AppError, TResult> onError) => this switch
     {
-        Success success => onSuccess(success.Value),
+        Success<TValue> success => onSuccess(success.Value),
         Failure failure => onError(failure.Error),
-        _ => throw new UnreachableException(),
     };
 
     /// <summary>Variante sem retorno, para efeitos colaterais (logging, side effects).</summary>
@@ -156,9 +153,8 @@ public abstract record ReturnSuccessOrError<TValue>
     {
         switch (this)
         {
-            case Success success: onSuccess(success.Value); break;
+            case Success<TValue> success: onSuccess(success.Value); break;
             case Failure failure: onError(failure.Error); break;
-            default: throw new UnreachableException();
         }
     }
 }
@@ -172,15 +168,17 @@ string message = result.Match(
     onSuccess: value => $"OK: {value}",
     onError:   error => $"Erro: {error.Message}");
 
-// 2) Via switch expression (compilador avisa CS8509 se faltar caso)
+// 2) Via switch expression (exaustivo: o union dispensa caso default)
 string message = result switch
 {
-    ReturnSuccessOrError<string>.Success(var value) => $"OK: {value}",
-    ReturnSuccessOrError<string>.Failure(var error) => $"Erro: {error.Message}",
+    Success<string>(var value) => $"OK: {value}",
+    Failure(var error) => $"Erro: {error.Message}",
 };
 ```
 
-> **Igualdade por valor:** por serem `record`s, `Success` e `Failure` recebem `Equals`/`GetHashCode`/`ToString` por valor automaticamente — equivalente ao comportamento esperado de uma união discriminada.
+> **Igualdade por valor:** o `union` (struct) recebe `Equals`/`GetHashCode` por valor, e os casos `Success`/`Failure`, por serem `record`s, também — `ReturnSuccessOrError<int>.Ok(1) == ReturnSuccessOrError<int>.Ok(1)`.
+>
+> **Pegadinha (struct wrapper):** o `union` é um struct que encapsula o caso. `GetType()` devolve o tipo do **union**, não de `Success`/`Failure`; e `is Failure` sobre uma referência `object` (boxed) dá `false`. Verifique o caso por pattern matching com o tipo estático do union (`result is Failure f`), nunca por `GetType()`/`ShouldBeOfType`. Ver `tests/ResultAssertions.cs`.
 
 ### 5.3 `AppError` — Contrato de Erro
 
@@ -398,16 +396,24 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         // FASE 1 — FETCH (no contexto da chamada; I/O-bound)
         var fetchResult = await FetchAsync(parameters, cancellationToken).ConfigureAwait(false);
 
-        // FASE 2 — CURTO-CIRCUITO no erro
-        if (fetchResult is ReturnSuccessOrError<TData>.Failure failure)
-            return ReturnSuccessOrError<TValue>.Err(failure.Error);
+        // FASE 2 — CURTO-CIRCUITO: switch exaustivo (union). Failure flui entre genéricos;
+        //          o Success é desconstruído por pattern matching (cast direto não é permitido em union).
+        return fetchResult switch
+        {
+            Failure failure => failure,
+            Success<TData> success =>
+                await ProcessStageAsync(success.Value, parameters, cancellationToken).ConfigureAwait(false),
+        };
+    }
 
-        var data = ((ReturnSuccessOrError<TData>.Success)fetchResult).Value;
-
-        // FASE 3 — PROCESS (direto ou em background; CPU-bound)
+    private async Task<ReturnSuccessOrError<TValue>> ProcessStageAsync(
+        TData data, ParametersReturnResult parameters, CancellationToken cancellationToken)
+    {
+        // FASE 3 — PROCESS direto (CPU-bound na thread chamadora)...
         if (!RunInBackground)
             return Process(data, parameters);
 
+        // ...ou despachado ao thread pool. Só o background converte exceção em Failure.
         return await Task.Run(() =>
         {
             try { return Process(data, parameters); }
@@ -524,8 +530,8 @@ Quem faz **Pure DI** (composição manual) ou usa outro container simplesmente r
 
 ## 6. Padrões de Design (idiomas C#)
 
-### 6.1 União Discriminada via `record` selado
-`abstract record` com construtor privado + subtipos `sealed record` aninhados. É a forma canônica de modelar discriminated unions em C# moderno, com igualdade por valor e desconstrução posicional gratuitas.
+### 6.1 União Discriminada via `union` nativo (C# 15)
+`readonly union` sobre dois `sealed record` top-level (`Success<TValue>`, `Failure`). A exaustividade do `switch`/`Match` é provada pelo compilador (sem caso default), com igualdade por valor e desconstrução posicional gratuitas. É a forma nativa de discriminated unions a partir do C# 15.
 
 ### 6.2 Railway-Oriented Programming
 O fluxo fetch → process é um "trilho": se a busca falha, o processamento é pulado e o erro segue direto até o chamador. Curto-circuito implementado com `is Failure`.
@@ -536,8 +542,8 @@ O fluxo fetch → process é um "trilho": se a busca falha, o processamento é p
 ### 6.4 `Process` como método abstrato (não delegate)
 Diferente de abordagens baseadas em delegate/typedef, `Process` é um **método abstrato** sobrescrito pela subclasse — o idioma natural de polimorfismo em C#. Reduz boilerplate e é diretamente testável.
 
-### 6.5 Implementação Explícita de Interface
-`NoParams` implementa `ParametersReturnResult.Error` explicitamente para fornecer um default não-nulo sem alterar a natureza nullable do parâmetro do `record`.
+### 6.5 Erro default via construtor
+`NoParams` herda de `ParametersReturnResult` com um construtor que aplica o fallback (`: base(error ?? new ErrorGeneric(...))`), fornecendo um `AppError` não-nulo quando nenhum é informado — sem expor um `Error` nullable.
 
 ### 6.6 Imutabilidade com `record` + `with`
 Erros e parâmetros são imutáveis. O enriquecimento de mensagem usa `with { Message = ... }`, preservando o tipo concreto — substitui o `copyWith` manual de outras linguagens.
@@ -588,8 +594,8 @@ result.Match(onSuccess: ..., onError: ...)   // tratamento obrigatório
 
 ## 9. Peculiaridades e Decisões de Design (específicas de C#)
 
-### 9.1 Por que construtor privado em `ReturnSuccessOrError<TValue>`?
-Fecha a hierarquia. Sem ele, qualquer assembly poderia criar um terceiro subtipo, quebrando a exaustividade do `switch`/`Match`. Com o construtor privado, apenas `Success` e `Failure` (aninhados) existem.
+### 9.1 Por que `union` (e não `abstract record` com construtor privado)?
+O `union` do C# 15 fecha a hierarquia **na linguagem**: o compilador prova que só existem `Success<TValue>` e `Failure`, garantindo a exaustividade do `switch`/`Match` sem caso default. Antes do C# 15, a forma canônica era um `abstract record` com construtor privado e casos aninhados (emulando a selagem); o `union` torna isso nativo, com os casos **top-level**. **Atenção:** o `union` é um struct wrapper — `GetType()` devolve o tipo do union, não do caso; verifique o caso por pattern matching (`is Failure`), nunca por `GetType()` (ver §5.2 e `tests/ResultAssertions.cs`).
 
 ### 9.2 Por que `Task.Run` em vez de algo "mais isolado"?
 Processamento CPU-bound bloqueia a thread chamadora (de requisição no ASP.NET, ou de UI no MAUI). `Task.Run` despacha para o thread pool. Diferente de modelos de memória isolada, threads .NET compartilham memória — então **não há restrição de serialização** e o `Process` pode ser um método de instância normal. A busca de dados (I/O-bound) **não** vai para o thread pool: I/O assíncrono já libera a thread sem precisar de `Task.Run`, e despachar I/O para o pool é desperdício.

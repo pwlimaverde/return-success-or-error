@@ -57,7 +57,7 @@ A biblioteca é estruturada em torno de tipos simples com responsabilidades úni
 
 | Tipo / Contrato | Responsabilidade |
 | :--- | :--- |
-| `ReturnSuccessOrError<TValue>` | União discriminada abstrata e selada contendo os tipos aninhados `Success` e `Failure`. |
+| `ReturnSuccessOrError<TValue>` | União discriminada (`union` do C# 15) sobre os tipos top-level `Success<TValue>` e `Failure`. Exaustividade provada pelo compilador. |
 | `Success(TValue Value)` | Subtipo selado que encapsula o valor de sucesso. |
 | `Failure(AppError Error)` | Subtipo selado que encapsula o erro de domínio. |
 | `Match<TResult>` | Método que força o consumo exaustivo com retorno tipado (duas funções: `onSuccess` + `onError`). |
@@ -295,12 +295,12 @@ resultado.Switch(
     onError:   erro => Console.WriteLine($"Falha: {erro.Message}")
 );
 
-// Opção 3: Via C# Pattern Matching (switch expression)
+// Opção 3: Via C# Pattern Matching (switch expression, exaustivo — sem caso default)
 string respostaPattern = resultado switch
 {
-    ReturnSuccessOrError<RelatorioVendasResult>.Success(var relatorio)
+    Success<RelatorioVendasResult>(var relatorio)
         => $"Sucesso! Total: {relatorio.FaturamentoTotal}",
-    ReturnSuccessOrError<RelatorioVendasResult>.Failure(var erro)
+    Failure(var erro)
         => $"Falha: {erro.Message}",
 };
 ```
