@@ -24,6 +24,9 @@ public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)
     /// <summary>Açúcar: converte um valor de sucesso diretamente (ex.: <c>return value;</c>).</summary>
     public static implicit operator ReturnSuccessOrError<TValue>(TValue value) => new Success<TValue>(value);
 
+    /// <summary>Açúcar: converte um erro diretamente em falha (ex.: <c>return parameters.Error;</c>).</summary>
+    public static implicit operator ReturnSuccessOrError<TValue>(AppError error) => new Failure(error);
+
     /// <summary>Consumo exaustivo: obriga tratar sucesso e erro; o compilador prova a exaustividade.</summary>
     public TResult Match<TResult>(
         Func<TValue, TResult> onSuccess,

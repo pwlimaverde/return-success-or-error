@@ -16,8 +16,8 @@ public sealed class FibonacciUsecase : UsecaseBase<long>
     {
         var fp = (FibonacciParameters)p;
         if (fp.N < 0)
-            return ReturnSuccessOrError<long>.Err(p.Error.WithMessage("N deve ser >= 0"));
-        return ReturnSuccessOrError<long>.Ok(Fib(fp.N));
+            return p.Error.WithMessage("N deve ser >= 0");  // AppError -> Failure
+        return Fib(fp.N);                                    // long -> Success
     }
 
     private static long Fib(int n) => n < 2 ? n : Fib(n - 1) + Fib(n - 2);

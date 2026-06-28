@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Estado do repositório
 
-**Implementado — biblioteca completa e testada.** A solution (`net11.0`, C# 15 em _preview_) tem a lib, testes e samples funcionando; 36 testes verdes; zero dependências de runtime. O tipo central usa `union` **nativo** do C# 15. **Publicação estável aguarda o GA do .NET 11 (nov/2026)** — o alvo é um framework preview e não deve ir ao NuGet como release estável até lá. Build/test exigem o SDK 11 (fixado em `global.json`).
+**Implementado — biblioteca completa e testada.** A solution (`net11.0`, C# 15 em _preview_) tem a lib, testes e samples funcionando; 38 testes verdes; zero dependências de runtime. O tipo central usa `union` **nativo** do C# 15. **Publicação estável aguarda o GA do .NET 11 (nov/2026)** — o alvo é um framework preview e não deve ir ao NuGet como release estável até lá. Build/test exigem o SDK 11 (fixado em `global.json`).
 
 Documentação de referência:
 

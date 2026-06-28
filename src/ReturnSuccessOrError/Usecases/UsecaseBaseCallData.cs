@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace ReturnSuccessOrError;
 
 /// <summary>
@@ -7,20 +5,14 @@ namespace ReturnSuccessOrError;
 /// <list type="number">
 ///   <item><b>FETCH</b> — busca o dado bruto na <see cref="IDataSource{TData}"/> (I/O-bound, no contexto da chamada).</item>
 ///   <item><b>CURTO-CIRCUITO</b> — se o fetch falha, retorna o erro sem chamar <see cref="Process"/>.</item>
-///   <item><b>PROCESS</b> — processa o dado (CPU-bound), direto ou no thread pool conforme <see cref="RunInBackground"/>.</item>
+///   <item><b>PROCESS</b> — processa o dado (CPU-bound), direto ou no thread pool conforme <see cref="UsecaseExecutorBase{TValue}.RunInBackground"/>.</item>
 /// </list>
 /// </summary>
 /// <typeparam name="TValue">Tipo do valor de sucesso.</typeparam>
 /// <typeparam name="TData">Tipo do dado bruto carregado pela fonte.</typeparam>
-public abstract class UsecaseBaseCallData<TValue, TData>
+public abstract class UsecaseBaseCallData<TValue, TData> : UsecaseExecutorBase<TValue>
 {
     private readonly IDataSource<TData> _dataSource;
-
-    /// <summary>Afeta SOMENTE o processamento; a busca de dados nunca vai para background.</summary>
-    public bool RunInBackground { get; init; }
-
-    /// <summary>Mede busca + processamento.</summary>
-    public bool MonitorExecutionTime { get; init; }
 
     /// <summary>Recebe a fonte de dados (injeção por construtor).</summary>
     protected UsecaseBaseCallData(IDataSource<TData> dataSource) =>
@@ -31,19 +23,11 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         TData data,
         ParametersReturnResult parameters);
 
-    /// <summary>Executa o caso de uso (fetch → curto-circuito → process).</summary>
-    public async Task<ReturnSuccessOrError<TValue>> CallAsync(
+    /// <summary>Executa o caso de uso (fetch → curto-circuito → process), com medição opcional.</summary>
+    public Task<ReturnSuccessOrError<TValue>> CallAsync(
         ParametersReturnResult parameters,
-        CancellationToken cancellationToken = default)
-    {
-        if (!MonitorExecutionTime)
-            return await RunAsync(parameters, cancellationToken).ConfigureAwait(false);
-
-        var startTimestamp = Stopwatch.GetTimestamp();
-        var result = await RunAsync(parameters, cancellationToken).ConfigureAwait(false);
-        LogTime(GetType().Name, Stopwatch.GetElapsedTime(startTimestamp), RunInBackground);
-        return result;
-    }
+        CancellationToken cancellationToken = default) =>
+        MeasuredAsync(() => RunAsync(parameters, cancellationToken));
 
     private async Task<ReturnSuccessOrError<TValue>> RunAsync(
         ParametersReturnResult parameters,
@@ -52,36 +36,16 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         // FASE 1 — FETCH (no contexto da chamada; I/O-bound)
         var fetchResult = await FetchAsync(parameters, cancellationToken).ConfigureAwait(false);
 
-        // FASE 2 — CURTO-CIRCUITO: se falhou, propaga o erro (Failure flui entre genéricos);
-        //          senão, segue para a FASE 3 — PROCESS. O switch é exaustivo (união fechada).
+        // FASE 2 — CURTO-CIRCUITO: switch exaustivo. Failure flui entre genéricos; o Success é
+        //          desconstruído por pattern matching (cast direto não é permitido em union).
+        // FASE 3 — PROCESS: delegado à base (direto ou background).
         return fetchResult switch
         {
             Failure failure => failure,
             Success<TData> success =>
-                await ProcessStageAsync(success.Value, parameters, cancellationToken).ConfigureAwait(false),
+                await ProcessStageAsync(() => Process(success.Value, parameters), parameters, cancellationToken)
+                    .ConfigureAwait(false),
         };
-    }
-
-    private async Task<ReturnSuccessOrError<TValue>> ProcessStageAsync(
-        TData data,
-        ParametersReturnResult parameters,
-        CancellationToken cancellationToken)
-    {
-        // PROCESS direto (CPU-bound na thread chamadora)...
-        if (!RunInBackground)
-            return Process(data, parameters);
-
-        // ...ou despachado ao thread pool. Só o background converte exceção em Failure.
-        return await Task.Run(() =>
-        {
-            try { return Process(data, parameters); }
-            catch (Exception ex)
-            {
-                return ReturnSuccessOrError<TValue>.Err(
-                    parameters.Error.WithMessage(
-                        $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}"));
-            }
-        }, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ReturnSuccessOrError<TData>> FetchAsync(
@@ -96,12 +60,7 @@ public abstract class UsecaseBaseCallData<TValue, TData>
         catch (Exception ex)
         {
             return ReturnSuccessOrError<TData>.Err(
-                parameters.Error.WithMessage(
-                    $"{parameters.Error.Message} - Cod. {ErrorCodes.DataSourceCatch} --- Catch: {ex}"));
+                parameters.Error.WithCatch(ErrorCodes.DataSourceCatch, ex));
         }
     }
-
-    private static void LogTime(string name, TimeSpan elapsed, bool background) =>
-        Debug.WriteLine($"[ReturnSuccessOrError] Execution Time {name} " +
-                        $"({(background ? "Background" : "Direct")}): {elapsed.TotalMilliseconds:F2}ms");
 }

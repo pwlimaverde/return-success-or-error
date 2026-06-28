@@ -7,8 +7,17 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+### Adicionado
+
+- **Conversão implícita de `AppError`** → `Failure`: `return parameters.Error;` (e
+  `return parameters.Error.WithMessage(...)`) no `Process`, dispensando `Err(...)`.
+
 ### Alterado
 
+- **Base comum `UsecaseExecutorBase<TValue>`** concentra o que era duplicado entre
+  `UsecaseBase` e `UsecaseBaseCallData` (medição de tempo, despacho ao thread pool, log).
+  O formato da mensagem de rastreio (`DataSourceCatch`/`BackgroundCatch`) foi centralizado
+  em um helper interno (`ErrorTrace.WithCatch`).
 - **Tipo central migrado para `union` nativo do C# 15.** `ReturnSuccessOrError<TValue>` deixa de
   ser um `abstract record` com construtor privado e casos aninhados, passando a
   `public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)` sobre os

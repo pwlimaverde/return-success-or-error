@@ -27,9 +27,11 @@ public sealed class CheckConnectionUsecase(IDataSource<bool> ds)
     : UsecaseBaseCallData<string, bool>(ds)
 {
     protected override ReturnSuccessOrError<string> Process(bool online, ParametersReturnResult p)
-        => online
-            ? ReturnSuccessOrError<string>.Ok("You are connected")
-            : ReturnSuccessOrError<string>.Err(p.Error.WithMessage("You are offline"));
+    {
+        if (!online)
+            return p.Error.WithMessage("You are offline");  // AppError -> Failure (conversão implícita)
+        return "You are connected";                          // string -> Success (conversão implícita)
+    }
 }
 
 /// <summary>Service da feature (Service Layer) — ponto de entrada público.</summary>

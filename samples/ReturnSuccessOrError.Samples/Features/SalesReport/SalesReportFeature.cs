@@ -44,8 +44,7 @@ public sealed class GenerateSalesReportUsecase(IDataSource<IReadOnlyList<SalesRo
         IReadOnlyList<SalesRow> rows, ParametersReturnResult p)
     {
         if (rows.Count == 0)
-            return ReturnSuccessOrError<SalesReport>.Err(
-                p.Error.WithMessage("Sem vendas no período"));
+            return p.Error.WithMessage("Sem vendas no período");  // AppError -> Failure
 
         decimal revenue = 0;
         var items = 0;
@@ -60,8 +59,7 @@ public sealed class GenerateSalesReportUsecase(IDataSource<IReadOnlyList<SalesRo
 
         var top = byProduct.MaxBy(kv => kv.Value).Key;
 
-        return ReturnSuccessOrError<SalesReport>.Ok(new SalesReport(
-            items, revenue, revenue / rows.Count, top));
+        return new SalesReport(items, revenue, revenue / rows.Count, top);  // -> Success
     }
 }
 

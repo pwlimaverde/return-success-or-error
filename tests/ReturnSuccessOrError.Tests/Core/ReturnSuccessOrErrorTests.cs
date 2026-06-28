@@ -120,6 +120,22 @@ public class ReturnSuccessOrErrorTests
     }
 
     [Fact]
+    public void ConversaoImplicita_DeValor_CriaSuccess()
+    {
+        ReturnSuccessOrError<int> result = 42; // implicit: TValue -> Success
+
+        result.ShouldBeSuccess().Value.ShouldBe(42);
+    }
+
+    [Fact]
+    public void ConversaoImplicita_DeAppError_CriaFailure()
+    {
+        ReturnSuccessOrError<int> result = new ErrorGeneric("falhou"); // implicit: AppError -> Failure
+
+        result.ShouldBeFailure().Error.Message.ShouldBe("falhou");
+    }
+
+    [Fact]
     public void Unit_ESingleton_ComToStringCorreto()
     {
         Unit.Value.ShouldBeSameAs(Unit.Value);

@@ -108,8 +108,9 @@ ParametersReturnResult                (interface)
 
 IDataSource<TData>                     (interface)
 
-UsecaseBase<TValue>                                (abstract class)
-UsecaseBaseCallData<TValue, TData>                 (abstract class)
+UsecaseExecutorBase<TValue>                        (abstract class — base comum: medição + background)
+├── UsecaseBase<TValue>                            (abstract class — só processamento)
+└── UsecaseBaseCallData<TValue, TData>             (abstract class — fetch + processamento)
 
 IFeatureService                         (interface — marcador para Service Layer; zero dependência)
 
@@ -136,8 +137,9 @@ public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)
     public static ReturnSuccessOrError<TValue> Ok(TValue value) => new Success<TValue>(value);
     public static ReturnSuccessOrError<TValue> Err(AppError error) => new Failure(error);
 
-    // Açúcar: converte um valor de sucesso diretamente (ex.: return value;).
+    // Açúcar: converte valor/erro diretamente (ex.: return value;  /  return parameters.Error;).
     public static implicit operator ReturnSuccessOrError<TValue>(TValue value) => new Success<TValue>(value);
+    public static implicit operator ReturnSuccessOrError<TValue>(AppError error) => new Failure(error);
 
     /// <summary>Consumo exaustivo: o compilador prova a exaustividade — sem caso default.</summary>
     public TResult Match<TResult>(
