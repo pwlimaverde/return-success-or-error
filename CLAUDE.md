@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Estado do repositório
 
-**Implementado — biblioteca completa e testada.** A solution (`net11.0`, C# 15 em _preview_) tem a lib, testes e samples funcionando; 38 testes verdes; zero dependências de runtime. O tipo central usa `union` **nativo** do C# 15. **Publicação estável aguarda o GA do .NET 11 (nov/2026)** — o alvo é um framework preview e não deve ir ao NuGet como release estável até lá. Build/test exigem o SDK 11 (fixado em `global.json`).
+**Implementado — biblioteca completa e testada.** A solution (`net11.0`, C# 15 em _preview_) tem a lib, testes e samples funcionando; 34 testes verdes; zero dependências de runtime. O tipo central usa `union` **nativo** do C# 15. **Publicação estável aguarda o GA do .NET 11 (nov/2026)** — o alvo é um framework preview e não deve ir ao NuGet como release estável até lá. Build/test exigem o SDK 11 (fixado em `global.json`).
 
 Documentação de referência:
 
@@ -14,7 +14,7 @@ Documentação de referência:
 
 Ao evoluir o código, **siga essas specs**; não reinvente nomes ou assinaturas. Se divergir da spec por um bom motivo, atualize o doc correspondente no mesmo passo.
 
-> **Analisadores:** `AnalysisLevel=latest-all` + `TreatWarningsAsErrors` ativam todas as regras CA. O `.editorconfig` suprime — com justificativa e escopadas por glob (`src`/`tests`/`samples`) — apenas as regras que conflitam com decisões de design deliberadas do PRD (ex.: CA1034 tipos aninhados, CA1000 fábricas estáticas, CA1031 catch na fronteira). Antes de suprimir uma nova, verifique se é decisão de design já documentada.
+> **Analisadores:** `AnalysisLevel=latest-all` + `TreatWarningsAsErrors` ativam todas as regras CA. O `.editorconfig` suprime — com justificativa e escopadas por glob (`src`/`tests`/`samples`) — apenas as regras que conflitam com decisões de design deliberadas do PRD (ex.: CA1815 igualdade por valor do union, CA2225 conversão implícita, CA1031 catch na fronteira). Antes de suprimir uma nova, verifique se é decisão de design já documentada.
 
 Idioma: toda comunicação e documentação em **português (pt-br)**. Identificadores e código em inglês.
 
@@ -40,7 +40,7 @@ Publicação é automática via tag `vX.Y.Z` (GitHub Actions, ver DEVELOPMENT_PL
 
 A biblioteca gira em torno de uma **união discriminada selada** e duas **classes base de caso de uso** que orquestram o fluxo. O desenvolvedor que consome a lib escreve apenas a regra de negócio (`Process`).
 
-**Tipo central — `ReturnSuccessOrError<TValue>`:** `union` **nativo** do C# 15 — `public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)` — sobre dois `sealed record` **top-level**, `Success<TValue>(TValue Value)` e `Failure(AppError Error)`. O compilador prova a exaustividade: `Match`/`switch` dispensam caso default. Fábricas `.Ok(value)`/`.Err(error)` e conversão implícita de `TValue` (`return value;`). **Pegadinha:** o union é um struct wrapper — `GetType()` devolve o tipo do union, não do caso; testes verificam o caso por pattern matching (`is Success<T>`/`is Failure`), via os helpers em `tests/ResultAssertions.cs`, não `ShouldBeOfType`.
+**Tipo central — `ReturnSuccessOrError<TValue>`:** `union` **nativo** do C# 15 — `public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)` — sobre dois `sealed record` **top-level**, `Success<TValue>(TValue Value)` e `Failure(AppError Error)`. O compilador prova a exaustividade: `Match`/`switch` dispensam caso default. A criação é **só por conversão implícita** — de `TValue` (`return value;`) e de `AppError` (`return error;`); não há fábricas `Ok`/`Err` públicas (o consumidor nunca constrói a união, só a consome via `Match` ou `switch` nativo). A própria base usa o mesmo idioma de criação. Não há método `Switch` — efeito colateral usa `switch` nativo. **Pegadinha:** o union é um struct wrapper — `GetType()` devolve o tipo do union, não do caso; testes verificam o caso por pattern matching (`is Success<T>`/`is Failure`), via os helpers em `tests/ResultAssertions.cs`, não `ShouldBeOfType`.
 
 **Fluxo do `UsecaseBaseCallData<TValue, TData>` (3 fases) — o conceito mais importante:**
 1. **FETCH** — `await IDataSource<TData>.CallAsync(...)` no contexto da chamada (I/O-bound; nunca vai para background). Exceção aqui é capturada e vira `Failure` com código `ErrorCodes.DataSourceCatch`.

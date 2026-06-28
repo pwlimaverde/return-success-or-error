@@ -16,7 +16,7 @@ public class UsecaseBaseCallDataTests
         protected override ReturnSuccessOrError<string> Process(int data, ParametersReturnResult p)
         {
             onProcess?.Invoke();
-            return ReturnSuccessOrError<string>.Ok($"valor: {data}");
+            return $"valor: {data}";
         }
     }
 

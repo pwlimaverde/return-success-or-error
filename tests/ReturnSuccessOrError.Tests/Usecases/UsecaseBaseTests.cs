@@ -16,7 +16,7 @@ public class UsecaseBaseTests
         protected override ReturnSuccessOrError<int> Process(ParametersReturnResult parameters)
         {
             var p = (NumberParams)parameters;
-            return ReturnSuccessOrError<int>.Ok(p.N * 2);
+            return p.N * 2;
         }
     }
 
@@ -29,13 +29,13 @@ public class UsecaseBaseTests
     private sealed class UnitUsecase : UsecaseBase<Unit>
     {
         protected override ReturnSuccessOrError<Unit> Process(ParametersReturnResult parameters)
-            => ReturnSuccessOrError<Unit>.Ok(Unit.Value);
+            => Unit.Value;
     }
 
     private sealed class NilUsecase : UsecaseBase<Nil>
     {
         protected override ReturnSuccessOrError<Nil> Process(ParametersReturnResult parameters)
-            => ReturnSuccessOrError<Nil>.Ok(Nil.Value);
+            => Nil.Value;
     }
 
     [Fact]

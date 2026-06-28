@@ -90,8 +90,8 @@ ReturnSuccessOrError/
 > **Supressões de analisadores (decisão de implementação).** `AnalysisLevel=latest-all` +
 > `TreatWarningsAsErrors` transforma algumas regras CA em erro que conflitam com decisões de
 > design **deliberadas** do PRD. Em vez de mutar a API, suprimimos no `.editorconfig` (escopo
-> `src/ReturnSuccessOrError/**.cs`) apenas estas, com justificativa: `CA1034` (tipos aninhados
-> `Success`/`Failure` — §5.2), `CA1000` (fábricas estáticas `Ok`/`Err` em genérico — §5.2),
+> `src/ReturnSuccessOrError/**.cs`) apenas estas, com justificativa: `CA1815` (o `union` já gera
+> igualdade por valor — §5.2), `CA2225` (conversão implícita é o único idioma de criação — §5.2),
 > `CA1724` (nome do tipo = namespace), `CA1716` (membro `Error` — §5.4), `CA1040`
 > (`IFeatureService` marcador — §5.9), `CA1031` (captura de `Exception` na fronteira — §9.5) e
 > `CA1062` (guardas de null redundantes com nullable habilitado). Todas as demais regras seguem ativas.
@@ -219,7 +219,7 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 | Tipo de resultado | `ReturnSuccessOrError<TValue>` | `readonly union` (C# 15) |
 | Caso de sucesso | `Success<TValue>` | `sealed record` top-level, `.Value` |
 | Caso de erro | `Failure` | `sealed record` top-level, `.Error` |
-| Fábricas | `.Ok(value)` / `.Err(error)` / `return value;` | estáticas + conversão implícita |
+| Criação | `return value;` / `return error;` | só conversão implícita (sem fábricas públicas) |
 | Consumo | `.Match(onSuccess, onError)` / `switch` | exaustivo (provado pelo compilador) |
 | Erro | `AppError` + `ErrorGeneric` | `WithMessage` preserva tipo |
 | Parâmetros | `ParametersReturnResult` + `NoParams` | expõem `Error` |
@@ -246,11 +246,11 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 ### 4.2 Matriz de Cenários
 
 **`Core/ReturnSuccessOrErrorTests.cs`**
-- `Ok` cria `Success` com `Value` correto.
-- `Err` cria `Failure` com `Error` correto.
+- Conversão implícita de `TValue` cria `Success` com `Value` correto.
+- Conversão implícita de `AppError` cria `Failure` com `Error` correto.
 - Igualdade por valor: dois `Success` com mesmo valor são iguais; dois `Failure` com mesmo erro são iguais.
 - `Match` chama o ramo correto e retorna o valor esperado.
-- `Switch` executa a ação correta.
+- `switch` nativo (expression) seleciona o ramo correto, exaustivo sem caso default.
 - `Unit.Value`/`Nil.Value` são singletons; `ToString` correto.
 
 **`Errors/AppErrorTests.cs`**
@@ -298,7 +298,7 @@ public class UsecaseBaseCallDataTests
         protected override ReturnSuccessOrError<string> Process(int data, ParametersReturnResult p)
         {
             onProcess?.Invoke();
-            return ReturnSuccessOrError<string>.Ok($"valor: {data}");
+            return $"valor: {data}";
         }
     }
 
@@ -375,9 +375,11 @@ public sealed class CheckConnectionUsecase(IDataSource<bool> ds)
     : UsecaseBaseCallData<string, bool>(ds)
 {
     protected override ReturnSuccessOrError<string> Process(bool online, ParametersReturnResult p)
-        => online
-            ? ReturnSuccessOrError<string>.Ok("You are connected")
-            : ReturnSuccessOrError<string>.Err(p.Error.WithMessage("You are offline"));
+    {
+        if (!online)
+            return p.Error.WithMessage("You are offline");  // AppError -> Failure
+        return "You are connected";                          // string -> Success
+    }
 }
 ```
 
@@ -392,8 +394,8 @@ public sealed class FibonacciUsecase : UsecaseBase<long>
     {
         var fp = (FibonacciParameters)p;
         if (fp.N < 0)
-            return ReturnSuccessOrError<long>.Err(p.Error.WithMessage("N deve ser >= 0"));
-        return ReturnSuccessOrError<long>.Ok(Fib(fp.N));
+            return p.Error.WithMessage("N deve ser >= 0");  // AppError -> Failure
+        return Fib(fp.N);                                    // long -> Success
     }
 
     private static long Fib(int n) => n < 2 ? n : Fib(n - 1) + Fib(n - 2);
@@ -416,8 +418,7 @@ public sealed class GenerateSalesReportUsecase(IDataSource<IReadOnlyList<SalesRo
         IReadOnlyList<SalesRow> rows, ParametersReturnResult p)
     {
         if (rows.Count == 0)
-            return ReturnSuccessOrError<SalesReport>.Err(
-                p.Error.WithMessage("Sem vendas no período"));
+            return p.Error.WithMessage("Sem vendas no período");  // AppError -> Failure
 
         decimal revenue = 0; int items = 0;
         var byProduct = new Dictionary<string, decimal>();
@@ -429,8 +430,7 @@ public sealed class GenerateSalesReportUsecase(IDataSource<IReadOnlyList<SalesRo
         }
         var top = byProduct.MaxBy(kv => kv.Value).Key;
 
-        return ReturnSuccessOrError<SalesReport>.Ok(new SalesReport(
-            items, revenue, revenue / rows.Count, top));
+        return new SalesReport(items, revenue, revenue / rows.Count, top);  // -> Success
     }
 }
 ```
@@ -585,7 +585,7 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 
 ### API
 - [ ] `ReturnSuccessOrError<T>` é `union` (C# 15); `Success<T>`/`Failure` top-level.
-- [ ] `Match` e `Switch` exaustivos (provados pelo compilador, sem caso default).
+- [ ] `Match` e `switch` nativo exaustivos (provados pelo compilador, sem caso default).
 - [ ] `AppError.WithMessage` preserva tipo concreto (coberto por teste).
 - [ ] `ParametersReturnResult` + `NoParams` com erro default.
 - [ ] `IDataSource<T>.CallAsync` com `CancellationToken`.

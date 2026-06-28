@@ -133,11 +133,8 @@ public sealed record Failure(AppError Error);
 
 public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)
 {
-    // Fábricas estáticas — leitura fluente e evitam repetir o genérico.
-    public static ReturnSuccessOrError<TValue> Ok(TValue value) => new Success<TValue>(value);
-    public static ReturnSuccessOrError<TValue> Err(AppError error) => new Failure(error);
-
-    // Açúcar: converte valor/erro diretamente (ex.: return value;  /  return parameters.Error;).
+    // Criação por conversão implícita (ex.: return value;  /  return parameters.Error;).
+    // Não há fábricas Ok/Err públicas: o consumidor nunca constrói a união, só a consome.
     public static implicit operator ReturnSuccessOrError<TValue>(TValue value) => new Success<TValue>(value);
     public static implicit operator ReturnSuccessOrError<TValue>(AppError error) => new Failure(error);
 
@@ -149,16 +146,6 @@ public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)
         Success<TValue> success => onSuccess(success.Value),
         Failure failure => onError(failure.Error),
     };
-
-    /// <summary>Variante sem retorno, para efeitos colaterais (logging, side effects).</summary>
-    public void Switch(Action<TValue> onSuccess, Action<AppError> onError)
-    {
-        switch (this)
-        {
-            case Success<TValue> success: onSuccess(success.Value); break;
-            case Failure failure: onError(failure.Error); break;
-        }
-    }
 }
 ```
 
@@ -178,7 +165,9 @@ string message = result switch
 };
 ```
 
-> **Igualdade por valor:** o `union` (struct) recebe `Equals`/`GetHashCode` por valor, e os casos `Success`/`Failure`, por serem `record`s, também — `ReturnSuccessOrError<int>.Ok(1) == ReturnSuccessOrError<int>.Ok(1)`.
+> **Criação só por conversão implícita:** não há fábricas `Ok`/`Err` públicas. A união nasce de um `return value;` (→ `Success`) ou `return error;` (→ `Failure`), tanto no `Process` do consumidor quanto na base da lib. O consumidor nunca constrói a união — só a consome via `Match` ou `switch` nativo.
+>
+> **Igualdade por valor:** o `union` (struct) recebe `Equals`/`GetHashCode` por valor, e os casos `Success`/`Failure`, por serem `record`s, também — duas conversões `(ReturnSuccessOrError<int>)1` são iguais entre si.
 >
 > **Pegadinha (struct wrapper):** o `union` é um struct que encapsula o caso. `GetType()` devolve o tipo do **union**, não de `Success`/`Failure`; e `is Failure` sobre uma referência `object` (boxed) dá `false`. Verifique o caso por pattern matching com o tipo estático do union (`result is Failure f`), nunca por `GetType()`/`ShouldBeOfType`. Ver `tests/ResultAssertions.cs`.
 
@@ -333,14 +322,14 @@ public abstract class UsecaseBase<TValue>
         if (!RunInBackground)
             return Task.FromResult(Process(parameters));
 
-        return Task.Run(() =>
+        return Task.Run<ReturnSuccessOrError<TValue>>(() =>
         {
             try { return Process(parameters); }
             catch (Exception ex)
             {
-                return ReturnSuccessOrError<TValue>.Err(
-                    parameters.Error.WithMessage(
-                        $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}"));
+                // AppError -> Failure (conversão implícita); Task.Run<...> anotado fixa o tipo.
+                return parameters.Error.WithMessage(
+                    $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}");
             }
         }, cancellationToken);
     }
@@ -416,14 +405,14 @@ public abstract class UsecaseBaseCallData<TValue, TData>
             return Process(data, parameters);
 
         // ...ou despachado ao thread pool. Só o background converte exceção em Failure.
-        return await Task.Run(() =>
+        return await Task.Run<ReturnSuccessOrError<TValue>>(() =>
         {
             try { return Process(data, parameters); }
             catch (Exception ex)
             {
-                return ReturnSuccessOrError<TValue>.Err(
-                    parameters.Error.WithMessage(
-                        $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}"));
+                // AppError -> Failure (conversão implícita); Task.Run<...> anotado fixa o tipo.
+                return parameters.Error.WithMessage(
+                    $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}");
             }
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -434,14 +423,14 @@ public abstract class UsecaseBaseCallData<TValue, TData>
     {
         try
         {
-            var data = await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
-            return ReturnSuccessOrError<TData>.Ok(data);
+            // TData -> Success (conversão implícita)
+            return await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            return ReturnSuccessOrError<TData>.Err(
-                parameters.Error.WithMessage(
-                    $"{parameters.Error.Message} - Cod. {ErrorCodes.DataSourceCatch} --- Catch: {ex}"));
+            // AppError -> Failure (conversão implícita)
+            return parameters.Error.WithMessage(
+                $"{parameters.Error.Message} - Cod. {ErrorCodes.DataSourceCatch} --- Catch: {ex}");
         }
     }
 
@@ -656,7 +645,7 @@ Framework: **xUnit v3** + **NSubstitute** (mocking de `IDataSource<T>`) + **Shou
 
 | Área | Cenários |
 |---|---|
-| `ReturnSuccessOrError<T>` | acesso a `Success.Value`/`Failure.Error`, igualdade por valor, `Match`, `Switch`, exaustividade |
+| `ReturnSuccessOrError<T>` | acesso a `Success.Value`/`Failure.Error`, igualdade por valor, `Match`, `switch` nativo, exaustividade |
 | `UsecaseBase<T>` | execução direta, em background, `MonitorExecutionTime`, exceção → `Cod. BackgroundCatch`, resultado `Unit`/`Nil` |
 | `UsecaseBaseCallData<T,D>` | sucesso fetch+process, curto-circuito (process não chamado em falha de fetch), `Cod. DataSourceCatch`, paridade direto↔background, `CancellationToken` propagado |
 | `AppError`/`ErrorGeneric` | comparação por valor, `WithMessage` preserva tipo concreto |

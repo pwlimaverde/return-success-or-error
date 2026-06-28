@@ -5,40 +5,18 @@ Todas as mudanças notáveis deste projeto são documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
-## [Não lançado]
+## [1.0.0] - Não lançado
+
+Primeira versão (em .NET 11 / C# 15, ainda em _preview_). Biblioteca de domínio para Clean
+Architecture, com result type discriminado e bases de caso de uso. Zero dependências de runtime;
+AOT-friendly. A publicação estável aguarda o GA do .NET 11 (nov/2026).
 
 ### Adicionado
 
-- **Conversão implícita de `AppError`** → `Failure`: `return parameters.Error;` (e
-  `return parameters.Error.WithMessage(...)`) no `Process`, dispensando `Err(...)`.
-
-### Alterado
-
-- **Base comum `UsecaseExecutorBase<TValue>`** concentra o que era duplicado entre
-  `UsecaseBase` e `UsecaseBaseCallData` (medição de tempo, despacho ao thread pool, log).
-  O formato da mensagem de rastreio (`DataSourceCatch`/`BackgroundCatch`) foi centralizado
-  em um helper interno (`ErrorTrace.WithCatch`).
-- **Tipo central migrado para `union` nativo do C# 15.** `ReturnSuccessOrError<TValue>` deixa de
-  ser um `abstract record` com construtor privado e casos aninhados, passando a
-  `public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)` sobre os
-  `sealed record` **top-level** `Success<TValue>` e `Failure`. O compilador prova a exaustividade
-  (sem caso default). Adicionada conversão implícita de `TValue` (`return value;`).
-- **Alvo `net11.0` + C# 15 (`LangVersion preview`).** Requer o SDK do .NET 11 (fixado em
-  `global.json`). Publicação estável aguarda o GA do .NET 11 (nov/2026).
-
-> Nota: como o `union` é um struct wrapper, `GetType()` devolve o tipo do union (não do caso);
-> verifique o caso por pattern matching (`is Success<T>`/`is Failure`), não por `GetType()`.
-
-## [1.0.0] - 2026-06-23
-
-Primeira versão (em .NET 11 preview). Biblioteca de domínio para Clean Architecture,
-com result type discriminado e bases de caso de uso. Zero dependências de runtime; AOT-friendly.
-
-### Adicionado
-
-- **`ReturnSuccessOrError<TValue>`** — união discriminada (`union` do C# 15) com os casos
-  top-level `Success<TValue>` e `Failure`. Fábricas `Ok`/`Err`, conversão implícita de `TValue`,
-  consumo exaustivo via `Match` (com retorno) e `Switch` (efeitos colaterais).
+- **`ReturnSuccessOrError<TValue>`** — união discriminada (`union` nativo do C# 15) sobre os casos
+  top-level `Success<TValue>` e `Failure`. Criação **por conversão implícita** (`return value;` →
+  `Success`; `return error;` → `Failure`); consumo exaustivo via `Match` (com retorno) ou `switch`
+  nativo, com a exaustividade provada pelo compilador (sem caso default).
 - **`AppError`** (`abstract record`) + **`ErrorGeneric`** — erro de domínio como valor imutável;
   `WithMessage` (implementado uma vez na base, via clone virtual do `record`) enriquece a mensagem
   **preservando o tipo concreto**. Subtipos herdam — não reimplementam.
@@ -63,6 +41,10 @@ com result type discriminado e bases de caso de uso. Zero dependências de runti
 
 ### Notas de design
 
+- **Criação só por conversão implícita** (sem fábricas `Ok`/`Err` públicas): o consumidor nunca
+  constrói a união — apenas a consome via `Match` ou `switch` nativo. A própria base usa o mesmo idioma de criação.
+- Como o `union` é um **struct wrapper**, `GetType()` devolve o tipo do union (não do caso);
+  verifique o caso por pattern matching (`is Success<T>`/`is Failure`), não por `GetType()`.
 - Em **modo direto**, uma exceção lançada por `Process` **propaga** ao chamador; apenas o
   **modo background** a converte em `Failure` com `BackgroundCatch`. Exceções na fonte de
   dados são sempre convertidas em `Failure` com `DataSourceCatch`.
@@ -70,5 +52,4 @@ com result type discriminado e bases de caso de uso. Zero dependências de runti
   core — é metodologia documentada (PRD §5.10) que o consumidor implementa no container de DI
   dele, mantendo o core agnóstico de DI e com zero dependências de runtime.
 
-[Não lançado]: https://github.com/pwlimaverde/return-success-or-error/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/pwlimaverde/return-success-or-error/releases/tag/v1.0.0

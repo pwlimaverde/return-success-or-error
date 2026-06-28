@@ -54,13 +54,13 @@ public abstract class UsecaseBaseCallData<TValue, TData> : UsecaseExecutorBase<T
     {
         try
         {
-            var data = await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
-            return ReturnSuccessOrError<TData>.Ok(data);
+            // TData -> Success (conversão implícita)
+            return await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            return ReturnSuccessOrError<TData>.Err(
-                parameters.Error.WithCatch(ErrorCodes.DataSourceCatch, ex));
+            // AppError -> Failure (conversão implícita)
+            return parameters.Error.WithCatch(ErrorCodes.DataSourceCatch, ex);
         }
     }
 }

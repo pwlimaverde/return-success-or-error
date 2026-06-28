@@ -2,10 +2,15 @@ root = true
 
 [*]
 charset = utf-8
-end_of_line = crlf
+# LF para alinhar com a política do repositório (.gitattributes: eol=lf).
+end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 indent_style = space
+
+# Exceção: arquivos .sln são CRLF no repositório (.gitattributes: *.sln eol=crlf).
+[*.sln]
+end_of_line = crlf
 
 [*.{cs,csx}]
 indent_size = 4
@@ -77,10 +82,6 @@ csharp_style_prefer_primary_constructors = false:silent
 # com decisões de design DELIBERADAS e documentadas no PRD §5/§9. Suprimimos só essas,
 # mantendo todas as demais ativas.
 [src/ReturnSuccessOrError/**.cs]
-# União discriminada selada: Success/Failure são tipos aninhados por design (PRD §5.2).
-dotnet_diagnostic.CA1034.severity = none
-# Fábricas estáticas Ok/Err em tipo genérico — API especificada (PRD §5.2).
-dotnet_diagnostic.CA1000.severity = none
 # Nome do tipo central coincide com o namespace, por design.
 dotnet_diagnostic.CA1724.severity = none
 # Propriedade 'Error' faz parte do contrato público de parâmetros (PRD §5.4).
@@ -94,12 +95,16 @@ dotnet_diagnostic.CA1062.severity = none
 # union (C# 15) já fornece igualdade por valor (Equals/GetHashCode gerados pelo compilador);
 # operadores ==/!= explícitos não são necessários — compara-se via Equals/pattern matching.
 dotnet_diagnostic.CA1815.severity = none
-# Conversão implícita de TValue é açúcar opcional; Ok/Err são as alternativas nomeadas explícitas.
+# Conversão implícita é o único idioma de criação da união (return value; / return error;), por
+# design; um método nomeado alternativo (ToReturnSuccessOrError) contrariaria a API minimalista.
 dotnet_diagnostic.CA2225.severity = none
 # 'Populate switch': o switch sobre o union é exaustivo pela linguagem (compilador aceita sem
 # default); a regra de estilo ainda não reconhece a exaustividade do union (C# 15 preview).
 dotnet_diagnostic.IDE0010.severity = none
 dotnet_diagnostic.IDE0072.severity = none
+# CS8655: o fluxo de nullability ainda não reconhece a exaustividade do union (C# 15 preview); o
+# estado 'default' do struct nunca é produzido — a criação é sempre por conversão implícita.
+dotnet_diagnostic.CS8655.severity = none
 # Operador de conversão usa corpo de expressão, alinhado ao estilo do projeto (IDE0023).
 dotnet_diagnostic.IDE0023.severity = none
 

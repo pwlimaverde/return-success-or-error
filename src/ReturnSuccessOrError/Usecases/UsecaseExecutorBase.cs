@@ -43,13 +43,14 @@ public abstract class UsecaseExecutorBase<TValue>
         if (!RunInBackground)
             return Task.FromResult(process());
 
-        return Task.Run(() =>
+        // Task.Run<...> anotado fixa o tipo do resultado, habilitando a conversão
+        // implícita AppError -> Failure no braço de catch.
+        return Task.Run<ReturnSuccessOrError<TValue>>(() =>
         {
             try { return process(); }
             catch (Exception ex)
             {
-                return ReturnSuccessOrError<TValue>.Err(
-                    parameters.Error.WithCatch(ErrorCodes.BackgroundCatch, ex));
+                return parameters.Error.WithCatch(ErrorCodes.BackgroundCatch, ex);
             }
         }, cancellationToken);
     }

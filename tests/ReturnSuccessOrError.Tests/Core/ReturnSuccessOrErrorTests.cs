@@ -7,30 +7,10 @@ namespace ReturnSuccessOrError.Tests.Core;
 public class ReturnSuccessOrErrorTests
 {
     [Fact]
-    public void Ok_CriaSuccess_ComValorCorreto()
-    {
-        var result = ReturnSuccessOrError<int>.Ok(42);
-
-        var success = result.ShouldBeSuccess();
-        success.Value.ShouldBe(42);
-    }
-
-    [Fact]
-    public void Err_CriaFailure_ComErroCorreto()
-    {
-        var error = new ErrorGeneric("boom");
-
-        var result = ReturnSuccessOrError<int>.Err(error);
-
-        var failure = result.ShouldBeFailure();
-        failure.Error.ShouldBe(error);
-    }
-
-    [Fact]
     public void Success_TemIgualdadePorValor()
     {
-        var a = ReturnSuccessOrError<string>.Ok("x");
-        var b = ReturnSuccessOrError<string>.Ok("x");
+        ReturnSuccessOrError<string> a = "x";
+        ReturnSuccessOrError<string> b = "x";
 
         a.ShouldBe(b);
         a.GetHashCode().ShouldBe(b.GetHashCode());
@@ -39,8 +19,8 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void Failure_TemIgualdadePorValor()
     {
-        var a = ReturnSuccessOrError<string>.Err(new ErrorGeneric("e"));
-        var b = ReturnSuccessOrError<string>.Err(new ErrorGeneric("e"));
+        ReturnSuccessOrError<string> a = new ErrorGeneric("e");
+        ReturnSuccessOrError<string> b = new ErrorGeneric("e");
 
         a.ShouldBe(b);
     }
@@ -48,8 +28,8 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void SuccessEFailure_NaoSaoIguais()
     {
-        var success = ReturnSuccessOrError<int>.Ok(1);
-        var failure = ReturnSuccessOrError<int>.Err(new ErrorGeneric("e"));
+        ReturnSuccessOrError<int> success = 1;
+        ReturnSuccessOrError<int> failure = new ErrorGeneric("e");
 
         success.ShouldNotBe(failure);
     }
@@ -57,7 +37,7 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void Match_ChamaRamoDeSucesso()
     {
-        var result = ReturnSuccessOrError<int>.Ok(10);
+        ReturnSuccessOrError<int> result = 10;
 
         var message = result.Match(
             onSuccess: v => $"ok:{v}",
@@ -69,7 +49,7 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void Match_ChamaRamoDeErro()
     {
-        var result = ReturnSuccessOrError<int>.Err(new ErrorGeneric("falhou"));
+        ReturnSuccessOrError<int> result = new ErrorGeneric("falhou");
 
         var message = result.Match(
             onSuccess: v => $"ok:{v}",
@@ -79,35 +59,9 @@ public class ReturnSuccessOrErrorTests
     }
 
     [Fact]
-    public void Switch_ExecutaAcaoDeSucesso()
-    {
-        var result = ReturnSuccessOrError<int>.Ok(7);
-        int? captured = null;
-
-        result.Switch(
-            onSuccess: v => captured = v,
-            onError: _ => captured = -1);
-
-        captured.ShouldBe(7);
-    }
-
-    [Fact]
-    public void Switch_ExecutaAcaoDeErro()
-    {
-        var result = ReturnSuccessOrError<int>.Err(new ErrorGeneric("e"));
-        string? captured = null;
-
-        result.Switch(
-            onSuccess: _ => captured = "ok",
-            onError: e => captured = e.Message);
-
-        captured.ShouldBe("e");
-    }
-
-    [Fact]
     public void SwitchExpression_ExaustivoPorPadrao()
     {
-        ReturnSuccessOrError<string> result = ReturnSuccessOrError<string>.Ok("v");
+        ReturnSuccessOrError<string> result = "v";
 
         // union (C# 15): o compilador PROVA a exaustividade — dois braços, sem caso default.
         var text = result switch

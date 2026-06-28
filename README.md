@@ -26,7 +26,7 @@ Dessa arquitetura surgem três dores recorrentes:
 
 A `ReturnSuccessOrError` resolve esses problemas estruturando o fluxo de execução através de contratos bem delimitados:
 
-- **União Discriminada Selada (`ReturnSuccessOrError<TValue>`)**: Força o tratamento exaustivo de sucesso ou falha através de `Match`/`Switch` ou `switch` expression em C#. O compilador avisa caso você esqueça de lidar com o erro.
+- **União Discriminada Selada (`ReturnSuccessOrError<TValue>`)**: Força o tratamento exaustivo de sucesso ou falha através do `Match` ou de um `switch` expression nativo em C#. O compilador prova a exaustividade — você não consegue esquecer de lidar com o erro.
 - **Orquestração em Fases (Fetch ➔ Curto-Circuito ➔ Process)**: A classe base orquestra a busca de dados na infraestrutura (I/O assíncrona) e isola o processamento puro no domínio. Se a busca falhar, ocorre um curto-circuito imediato: a fase de processamento de negócio sequer é executada.
 - **Separação de Threads Inteligente**: A busca de dados (I/O) sempre ocorre de forma assíncrona tradicional. Contudo, o processamento de regras de negócio (CPU-bound) pode ser opcionalmente delegado ao pool de threads do .NET em segundo plano (`Task.Run`) com uma simples flag (`RunInBackground = true`), mantendo a infraestrutura de I/O intacta na thread original.
 - **Preservação de Tipos (`AppError.WithMessage`)**: Os erros de domínio são imutáveis. Ao enriquecer mensagens de erro durante a subida de camadas, o tipo concreto do erro é preservado, permitindo logs e tratamentos específicos.
@@ -51,6 +51,57 @@ Ou via `PackageReference` no `.csproj`:
 
 ---
 
+## ⚡ Início Rápido (em 3 passos)
+
+Um caso de uso completo: busca um número na fonte de dados e responde se ele é **maior que 10**. Repare que você escreve **só a regra de negócio** — sem `try/catch`, sem `Ok(...)`/`Err(...)`, sem montar a união na mão.
+
+```csharp
+using ReturnSuccessOrError;
+
+// 1) Parâmetros — carregam o erro a ser usado caso algo falhe.
+public sealed record NumeroParams(AppError Error) : ParametersReturnResult(Error);
+
+// 2) Fonte de dados — devolve o dado cru (ex.: vindo do banco). Em caso de falha, lança;
+//    a base captura a exceção e a converte em Failure automaticamente.
+public sealed class NumeroDataSource : IDataSource<int>
+{
+    public Task<int> CallAsync(ParametersReturnResult parameters, CancellationToken ct = default)
+        => Task.FromResult(42); // simula o dado buscado
+}
+
+// 3) Caso de uso — recebe o número JÁ buscado e devolve um bool.
+public sealed class MaiorQue10Usecase(IDataSource<int> ds)
+    : UsecaseBaseCallData<bool, int>(ds)
+{
+    protected override ReturnSuccessOrError<bool> Process(int data, ParametersReturnResult p)
+        => data > 10; // ← o bool vira Success<bool> sozinho (conversão implícita)
+}
+```
+
+Executando e consumindo o resultado com `Match`:
+
+```csharp
+var usecase = new MaiorQue10Usecase(new NumeroDataSource());
+
+ReturnSuccessOrError<bool> resultado = await usecase.CallAsync(
+    new NumeroParams(new ErrorGeneric("Falha ao buscar número")));
+
+bool maior = resultado.Match(
+    onSuccess: valor => valor,   // valor já é o bool (aqui: true, pois 42 > 10)
+    onError:   _ => false);      // se o fetch falhou, trata como false
+```
+
+**O que aconteceu por baixo:** a fonte devolveu `42` → a base empacotou em `Success<int>(42)` → como o fetch deu certo, o `Process` recebeu o `42` já desempacotado → `42 > 10` → `Success<bool>(true)`. Se a fonte tivesse lançado uma exceção, viraria `Failure` (com o código `DataSourceCatch`), o `Process` **nem seria chamado**, e o `Match` cairia em `onError`.
+
+> Quer que "não ser maior que 10" seja um **erro** em vez de `false`? Troque o corpo por:
+> ```csharp
+> if (data <= 10)
+>     return p.Error.WithMessage("número não é maior que 10"); // AppError -> Failure
+> return true;                                                  // bool      -> Success
+> ```
+
+---
+
 ## 🛠️ Conceitos Centrais
 
 A biblioteca é estruturada em torno de tipos simples com responsabilidades únicas:
@@ -60,8 +111,7 @@ A biblioteca é estruturada em torno de tipos simples com responsabilidades úni
 | `ReturnSuccessOrError<TValue>` | União discriminada (`union` do C# 15) sobre os tipos top-level `Success<TValue>` e `Failure`. Exaustividade provada pelo compilador. |
 | `Success(TValue Value)` | Subtipo selado que encapsula o valor de sucesso. |
 | `Failure(AppError Error)` | Subtipo selado que encapsula o erro de domínio. |
-| `Match<TResult>` | Método que força o consumo exaustivo com retorno tipado (duas funções: `onSuccess` + `onError`). |
-| `Switch` | Variante de `Match` sem retorno, para efeitos colaterais como logging. |
+| `Match<TResult>` | Método que força o consumo exaustivo com retorno tipado (duas funções: `onSuccess` + `onError`). Para efeitos colaterais sem retorno, use um `switch` nativo. |
 | `AppError` | `abstract record` para erros de domínio imutáveis. Expõe `Message` e `WithMessage` (herdado) para enriquecimento preservando o tipo concreto. |
 | `ErrorGeneric` | Implementação padrão de `AppError` (`sealed record`). Pronta para uso quando não há necessidade de campos adicionais. |
 | `ParametersReturnResult` | `abstract record` de entrada do Caso de Uso. Garante que todo parâmetro traga consigo o `AppError` a ser usado em caso de falha. |
@@ -233,16 +283,16 @@ public class GerarRelatorioUseCase : UsecaseBaseCallData<RelatorioVendasResult, 
     {
         if (data.Count == 0)
         {
-            return ReturnSuccessOrError<RelatorioVendasResult>.Err(
-                parameters.Error.WithMessage("Nenhuma venda registrada no período selecionado."));
+            // AppError -> Failure (conversão implícita)
+            return parameters.Error.WithMessage("Nenhuma venda registrada no período selecionado.");
         }
 
         // Regra de negócio: Consolidação pesada de dados (CPU-bound)
         var totalFaturado = data.Sum(v => v.Quantidade * v.PrecoUnitario);
         var totalItens = data.Sum(v => v.Quantidade);
 
-        var relatorio = new RelatorioVendasResult(totalFaturado, totalItens);
-        return ReturnSuccessOrError<RelatorioVendasResult>.Ok(relatorio);
+        // RelatorioVendasResult -> Success (conversão implícita)
+        return new RelatorioVendasResult(totalFaturado, totalItens);
     }
 }
 ```
@@ -261,12 +311,12 @@ public class CalcularComissaoUseCase : UsecaseBase<decimal>
 
         if (parametros.ValorVenda <= 0)
         {
-            return ReturnSuccessOrError<decimal>.Err(
-                parameters.Error.WithMessage("O valor da venda deve ser positivo."));
+            // AppError -> Failure (conversão implícita)
+            return parameters.Error.WithMessage("O valor da venda deve ser positivo.");
         }
 
         var comissao = parametros.ValorVenda * 0.05m; // 5% de comissão
-        return ReturnSuccessOrError<decimal>.Ok(comissao);
+        return comissao;                              // decimal -> Success (conversão implícita)
     }
 }
 ```
@@ -289,11 +339,16 @@ string resposta = resultado.Match(
     onError:   erro => $"Erro: {erro.Message}"
 );
 
-// Opção 2: Via método Switch (para efeitos colaterais sem retorno)
-resultado.Switch(
-    onSuccess: relatorio => Console.WriteLine($"Sucesso: {relatorio.FaturamentoTotal:C}"),
-    onError:   erro => Console.WriteLine($"Falha: {erro.Message}")
-);
+// Opção 2: Via switch nativo (para efeitos colaterais sem retorno)
+switch (resultado)
+{
+    case Success<RelatorioVendasResult>(var relatorio):
+        Console.WriteLine($"Sucesso: {relatorio.FaturamentoTotal:C}");
+        break;
+    case Failure(var erro):
+        Console.WriteLine($"Falha: {erro.Message}");
+        break;
+}
 
 // Opção 3: Via C# Pattern Matching (switch expression, exaustivo — sem caso default)
 string respostaPattern = resultado switch
@@ -382,7 +437,7 @@ public class LoginUseCase : UsecaseBaseCallData<Session, Session>
     public LoginUseCase(ILoginDataSource dataSource) : base(dataSource) { }
 
     protected override ReturnSuccessOrError<Session> Process(Session data, ParametersReturnResult parameters)
-        => ReturnSuccessOrError<Session>.Ok(data);
+        => data;  // Session -> Success (conversão implícita)
 }
 
 // Features/Auth/Domain/UseCases/RefreshTokenUseCase.cs
@@ -391,7 +446,7 @@ public class RefreshTokenUseCase : UsecaseBaseCallData<Session, Session>
     public RefreshTokenUseCase(IRefreshDataSource dataSource) : base(dataSource) { }
 
     protected override ReturnSuccessOrError<Session> Process(Session data, ParametersReturnResult parameters)
-        => ReturnSuccessOrError<Session>.Ok(data);
+        => data;  // Session -> Success (conversão implícita)
 }
 
 // Features/Auth/Domain/UseCases/LogoutUseCase.cs
@@ -400,7 +455,7 @@ public class LogoutUseCase : UsecaseBaseCallData<Unit, Unit>
     public LogoutUseCase(ILogoutDataSource dataSource) : base(dataSource) { }
 
     protected override ReturnSuccessOrError<Unit> Process(Unit data, ParametersReturnResult parameters)
-        => ReturnSuccessOrError<Unit>.Ok(Unit.Value);
+        => Unit.Value;  // Unit -> Success (conversão implícita)
 }
 ```
 

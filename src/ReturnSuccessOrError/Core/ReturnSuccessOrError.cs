@@ -15,12 +15,6 @@ public sealed record Failure(AppError Error);
 /// <typeparam name="TValue">Tipo do valor carregado em caso de sucesso.</typeparam>
 public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)
 {
-    /// <summary>Cria um resultado de sucesso.</summary>
-    public static ReturnSuccessOrError<TValue> Ok(TValue value) => new Success<TValue>(value);
-
-    /// <summary>Cria um resultado de falha.</summary>
-    public static ReturnSuccessOrError<TValue> Err(AppError error) => new Failure(error);
-
     /// <summary>Açúcar: converte um valor de sucesso diretamente (ex.: <c>return value;</c>).</summary>
     public static implicit operator ReturnSuccessOrError<TValue>(TValue value) => new Success<TValue>(value);
 
@@ -35,14 +29,4 @@ public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)
             Success<TValue> success => onSuccess(success.Value),
             Failure failure => onError(failure.Error),
         };
-
-    /// <summary>Variante sem retorno, para efeitos colaterais (logging, side effects).</summary>
-    public void Switch(Action<TValue> onSuccess, Action<AppError> onError)
-    {
-        switch (this)
-        {
-            case Success<TValue> success: onSuccess(success.Value); break;
-            case Failure failure: onError(failure.Error); break;
-        }
-    }
 }
