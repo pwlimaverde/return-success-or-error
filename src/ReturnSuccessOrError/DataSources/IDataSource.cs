@@ -1,19 +1,23 @@
 namespace ReturnSuccessOrError;
 
 /// <summary>
-/// Contrato de fonte de dados (port de infraestrutura). Executa a chamada externa
-/// (I/O-bound) e devolve o dado bruto. Em caso de falha, <b>lança</b> uma exceção;
-/// a classe base de caso de uso a captura e a converte em <see cref="Failure"/>.
+/// Contrato de fonte de dados (port de infraestrutura). É a camada <b>burra</b>: executa a
+/// chamada externa (I/O-bound) e devolve o <b>dado bruto</b>, <b>ou lança</b> uma exceção
+/// técnica em caso de falha. Não tem nenhum conhecimento de domínio — não traduz erros.
+/// A tradução de exceção técnica num erro de domínio é responsabilidade da fronteira
+/// (<see cref="RepositoryBase{TData, TParams, TError}"/>, via <c>MapError</c>).
 /// </summary>
 /// <typeparam name="TData">Tipo do dado bruto retornado pela fonte.</typeparam>
-public interface IDataSource<TData>
+/// <typeparam name="TParams">Tipo dos parâmetros (só dados) da chamada.</typeparam>
+public interface IDataSource<TData, TParams>
+    where TParams : Parameters
 {
     /// <summary>
-    /// Executa a chamada externa e devolve o dado bruto, ou lança uma exceção em caso
-    /// de falha — a classe base a captura e a converte em
-    /// <see cref="Failure"/> usando o <see cref="AppError"/> dos parâmetros.
+    /// Executa a chamada externa e devolve o dado bruto, ou <b>lança</b> uma exceção técnica
+    /// em caso de falha — a fronteira (<see cref="RepositoryBase{TData, TParams, TError}"/>) a captura
+    /// e a traduz em <see cref="Failure{TError}"/>.
     /// </summary>
     Task<TData> CallAsync(
-        ParametersReturnResult parameters,
+        TParams parameters,
         CancellationToken cancellationToken = default);
 }

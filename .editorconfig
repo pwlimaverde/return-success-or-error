@@ -86,8 +86,6 @@ csharp_style_prefer_primary_constructors = false:silent
 dotnet_diagnostic.CA1724.severity = none
 # Propriedade 'Error' faz parte do contrato público de parâmetros (PRD §5.4).
 dotnet_diagnostic.CA1716.severity = none
-# IFeatureService é interface marcadora intencional para a Service Layer (PRD §5.9).
-dotnet_diagnostic.CA1040.severity = none
 # Exceções são capturadas e convertidas em Failure na fronteira da fonte de dados (PRD §9.5).
 dotnet_diagnostic.CA1031.severity = none
 # Nullable habilitado: a não-nulidade dos delegates é o contrato; guardas explícitas são redundantes.
@@ -125,6 +123,15 @@ dotnet_diagnostic.IDE0058.severity = none
 dotnet_diagnostic.CA1508.severity = none
 # 'Populate switch' no teste de exaustividade: o switch sobre o union é exaustivo pela linguagem.
 dotnet_diagnostic.IDE0072.severity = none
+# Tipos aninhados de fixture (ex.: TestParams) precisam ser públicos para servir de argumento de
+# tipo das interfaces mockadas (NSubstitute/Castle exige acesso); não são API real.
+dotnet_diagnostic.CA1034.severity = none
+dotnet_diagnostic.CA1515.severity = none
+# union de erro de teste (TestError): o union já gera igualdade por valor; ==/!= explícitos
+# não são necessários (mesma justificativa do core, §9 do PRD).
+dotnet_diagnostic.CA1815.severity = none
+# Alinhamento dos braços de switch nos testes é estilo intencional de legibilidade.
+dotnet_diagnostic.IDE0055.severity = none
 
 # ---- Projeto de samples: app de demonstração, não código de biblioteca ----
 [samples/**.cs]
@@ -142,3 +149,15 @@ dotnet_diagnostic.CA1724.severity = none
 dotnet_diagnostic.IDE0058.severity = none
 # IDE0005 (usings desnecessários) exige GenerateDocumentationFile; não geramos XML doc no app de demo.
 dotnet_diagnostic.IDE0005.severity = none
+# union de erro por feature: já gera igualdade por valor (mesma justificativa do core, §9 do PRD).
+dotnet_diagnostic.CA1815.severity = none
+# 'Populate switch' sobre o union de erro: o switch é exaustivo pela linguagem; a regra de estilo
+# ainda não reconhece a exaustividade do union (C# 15 preview).
+dotnet_diagnostic.IDE0072.severity = none
+# Alinhamento dos braços de switch (Describe) é estilo intencional de legibilidade.
+dotnet_diagnostic.IDE0055.severity = none
+# Namespace por FEATURE (não por subpasta): cada feature é uma fatia vertical com namespace
+# único na raiz da feature, mantendo as referências cruzadas (Domain/DataSources/Repositories/
+# Services) sem usings extras. Decisão de organização — não espelhamos cada subpasta no namespace.
+dotnet_style_namespace_match_folder = false
+dotnet_diagnostic.IDE0130.severity = none

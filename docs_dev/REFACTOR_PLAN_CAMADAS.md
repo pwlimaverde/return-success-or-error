@@ -1,6 +1,6 @@
 # Plano de Refatoração — Separação do Erro + Padronização de Camadas (3/2)
 
-> **Status:** proposto (aguardando implementação).
+> **Status:** ✅ implementado (todas as 6 fases concluídas; 39 testes verdes, build sem warnings, samples executando).
 > **Escopo:** evolução arquitetural do núcleo da lib para suportar o padrão
 > `DataSource → Repository → UseCase`, separar o erro dos parâmetros e padronizar
 > os parâmetros de tipo genérico em **3 (usecase) / 2 (data, repo)**.

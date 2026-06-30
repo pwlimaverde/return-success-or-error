@@ -10,16 +10,19 @@
 
 ## 1. Visão Geral
 
-`ReturnSuccessOrError` é uma biblioteca C# que fornece abstrações para a camada de domínio (casos de uso e fontes de dados) seguindo os princípios da Clean Architecture. Seu elemento central é um **tipo de resultado discriminado e selado** — `ReturnSuccessOrError<TValue>` — que representa o desfecho de qualquer operação como **sucesso** ou **erro**, obrigando o consumidor a tratar ambos os casos explicitamente em vez de depender de exceções que atravessam camadas.
+`ReturnSuccessOrError` é uma biblioteca C# que fornece abstrações para a camada de domínio (casos de uso, repositórios e fontes de dados) seguindo os princípios da Clean Architecture. Seu elemento central é um **tipo de resultado discriminado e selado** — `ReturnSuccessOrError<TValue, TError>` — que representa o desfecho de qualquer operação como **sucesso** ou **erro**. Com o **erro parametrizado** (`TError` é um `union` fechado por feature), o consumidor é obrigado pelo compilador a tratar **todos** os erros possíveis daquela feature, sem depender de exceções que atravessam camadas.
 
-A biblioteca substitui o padrão de `try/catch` espalhado por um fluxo previsível e tipado: o caso de uso busca dados de uma fonte (`IDataSource<T>`), faz curto-circuito automático em caso de falha, e processa o dado bruto numa função de negócio — opcionalmente em uma thread de background quando o processamento é intensivo em CPU.
+A biblioteca substitui o padrão de `try/catch` espalhado por um fluxo previsível e tipado, estruturado em **três camadas** (`DataSource → Repository → UseCase`): a fonte de dados (`IDataSource<TData, TParams>`) é **burra** — devolve dado bruto ou lança exceção técnica; o repositório (`IRepository<TData, TParams>`) é a **fronteira** (anti-corruption layer) que traduz a exceção em erro de domínio (`AppError`) via `MapError`; e o caso de uso busca o dado já tratado, faz curto-circuito automático em caso de falha, e processa o dado bruto numa função de negócio — opcionalmente em uma thread de background quando o processamento é intensivo em CPU.
+
+Por depender de uma abstração (`IRepository`), o caso de uso é **portável**: leva-se um `LoginUsecase` de um projeto a outro trocando apenas o datasource, sem tocar na regra de negócio (DIP).
 
 ### 1.1 Problemas que a biblioteca resolve
 
 | Problema recorrente em .NET | Solução da biblioteca |
 |---|---|
-| Exceções de I/O (banco, HTTP) vazam para camadas superiores e quebram o fluxo de forma imprevisível | Toda operação retorna `ReturnSuccessOrError<TValue>`; exceções são capturadas e encapsuladas como erro tipado |
-| `try/catch` repetido e inconsistente em cada handler/controller/service | A classe base orquestra captura, enriquecimento e curto-circuito de erros uma única vez |
+| Exceções de I/O (banco, HTTP) vazam para camadas superiores e quebram o fluxo de forma imprevisível | A fronteira (`RepositoryBase.MapError`) captura a exceção técnica e a traduz em `AppError` tipado; o domínio nunca vê exceção de infraestrutura |
+| `try/catch` repetido e inconsistente em cada handler/controller/service | A captura fica em um único lugar (o `Repository`); a base do caso de uso só orquestra curto-circuito e processamento |
+| Casos de uso amarrados à infraestrutura concreta, difíceis de portar | O caso de uso depende de `IRepository` (abstração); troca-se o datasource sem tocar na regra de negócio (DIP) |
 | Processamento CPU-bound (parsing, agregação) bloqueia a thread de requisição ou a UI | Separação fetch/process: o processamento pesado pode ser delegado a `Task.Run` (thread pool) via flag opt-in |
 | Resultado de erro perde o tipo concreto ao subir pelas camadas | `AppError.WithMessage` preserva o tipo concreto do erro ao enriquecer a mensagem |
 | Esquecer de tratar o caso de erro é fácil e silencioso | Tipo selado + método `Match` exaustivo tornam o tratamento de erro obrigatório |
@@ -30,18 +33,19 @@ A biblioteca substitui o padrão de `try/catch` espalhado por um fluxo previsív
 
 ### 2.1 Objetivos Primários
 
-1. **Eliminar o vazamento de exceções entre camadas.** Casos de uso nunca propagam exceções não tratadas para o chamador — devolvem um resultado tipado.
+1. **Eliminar o vazamento de exceções entre camadas.** A exceção técnica é traduzida em erro de domínio na fronteira (`Repository`); casos de uso nunca propagam exceções não tratadas — devolvem um resultado tipado.
 2. **Tornar o tratamento de erro obrigatório e visível.** O tipo selado com `Match`/`switch` força o consumidor a lidar com sucesso e erro, com verificação do compilador.
-3. **Padronizar a camada de domínio.** Duas classes base (`UsecaseBase<T>` e `UsecaseBaseCallData<T, TData>`) definem o esqueleto de execução; o desenvolvedor implementa apenas a regra de negócio.
-4. **Separar I/O de processamento.** A busca de dados (assíncrona, I/O-bound) roda no contexto da chamada; o processamento (CPU-bound) pode ir para o thread pool sem bloquear a thread chamadora.
+3. **Padronizar a camada de domínio em três camadas.** `DataSource → Repository → UseCase`: classes base (`RepositoryBase<TData, TParams>`, `UsecaseBase<TValue, TParams>` e `UsecaseBaseCallData<TValue, TData, TParams>`) definem o esqueleto de execução; o desenvolvedor implementa apenas `MapError` (tradução) e `Process` (regra).
+4. **Tornar os casos de uso portáveis (DIP).** O caso de uso depende de `IRepository`, nunca da infraestrutura concreta — leva-se a regra de negócio a outro projeto trocando só o datasource.
+5. **Separar I/O de processamento.** A busca de dados (assíncrona, I/O-bound) roda no contexto da chamada; o processamento (CPU-bound) pode ir para o thread pool sem bloquear a thread chamadora.
 
 ### 2.2 Objetivos Secundários
 
-5. **Integração idiomática com o ecossistema .NET** — suporte a `CancellationToken`, compatível com injeção de dependência (`Microsoft.Extensions.DependencyInjection`) e ASP.NET Core.
-6. **Tipagem forte ponta a ponta** — parâmetros, dado bruto da fonte, valor de sucesso e erro são todos genéricos e verificados em compilação.
-7. **Imutabilidade por padrão** — erros e parâmetros são `record`s imutáveis; enriquecimento via expressão `with`.
-8. **Zero dependências de runtime** — usa apenas a BCL (`System.*`); não acopla o consumidor a nenhum framework nem a um container de DI específico (a composição de features é convenção documentada, não tipo embarcado).
-9. **Observabilidade opt-in** — medição de tempo de execução habilitável por instância, sem custo quando desligada.
+6. **Integração idiomática com o ecossistema .NET** — suporte a `CancellationToken`, compatível com injeção de dependência (`Microsoft.Extensions.DependencyInjection`) e ASP.NET Core.
+7. **Tipagem forte ponta a ponta** — parâmetros, dado bruto da fonte, valor de sucesso e erro são todos genéricos e verificados em compilação.
+8. **Imutabilidade por padrão** — erros e parâmetros são `record`s imutáveis; enriquecimento via expressão `with`.
+9. **Zero dependências de runtime** — usa apenas a BCL (`System.*`); não acopla o consumidor a nenhum framework nem a um container de DI específico (a composição de features é convenção documentada, não tipo embarcado).
+10. **Observabilidade opt-in** — medição de tempo de execução habilitável por instância, sem custo quando desligada.
 
 ### 2.3 Não-objetivos
 
@@ -66,26 +70,25 @@ Desenvolvedores .NET (back-end com ASP.NET Core, serviços, workers, ou apps MAU
 
 ### 4.1 Dentro do Escopo
 
-- Tipo de resultado discriminado selado (`ReturnSuccessOrError<TValue>`) com subtipos `Success` e `Failure`.
+- Tipo de resultado discriminado selado (`ReturnSuccessOrError<TValue, TError>`) com subtipos `Success<TValue>` e `Failure<TError>`.
 - Método `Match` e suporte a `switch` por padrão para consumo exaustivo.
-- Contrato de erro (`AppError`) e implementação concreta (`ErrorGeneric`).
-- Códigos de rastreio centralizados em constantes (`ErrorCodes.DataSourceCatch` / `ErrorCodes.BackgroundCatch`).
-- Contrato de parâmetros (`ParametersReturnResult`) e implementação concreta (`NoParams`).
-- Contrato de fonte de dados (`IDataSource<TData>`).
-- Classes base de caso de uso: lógica pura e lógica com fonte de dados.
+- Base opcional de erro (`AppError`) e caso pronto (`ErrorGeneric`); o erro de cada feature é um `union` fechado (`TError`).
+- Contrato de parâmetros **só-dados** (`Parameters`) e implementação concreta (`NoParams`).
+- Contrato de fonte de dados **burra** (`IDataSource<TData, TParams>`).
+- Camada de **repositório** (fronteira / anti-corruption): contrato (`IRepository<TData, TParams, TError>`) e base com tradução de erro (`RepositoryBase<TData, TParams, TError>` + `MapError` abstrato).
+- Classes base de caso de uso: lógica pura e lógica com repositório.
 - Orquestração fetch → curto-circuito → process.
 - Execução opcional do processamento em thread pool (`Task.Run`).
 - Tipos auxiliares `Unit` (ausência de valor) e `Nil` (null semântico).
 - Medição opcional de tempo de execução.
-- Contrato marcador para serviços de feature (Service Layer) — `IFeatureService` (interface vazia, zero dependência).
-- **Metodologia de composição de features** (estrutura de pastas + padrão Module/Service) entregue como **convenção documentada** — ver seção 5.10.
+- **Metodologia de composição de features** (Service Layer + estrutura de pastas + padrão Module/aggregator) entregue como **convenção documentada / sugestão de implementação** — nenhum tipo de composição é embarcado no core. Ver seções 5.9–5.10.
 
 ### 4.2 Fora do Escopo
 
 - Geração de código / source generators (avaliado para versão futura).
 - Conversões implícitas avançadas (avaliado, opt-in futuro).
 - Integração com bibliotecas de validação (`FluentValidation`) — pode ser usada em conjunto, mas não é incluída.
-- **Tipos acoplados a um container de DI** (`IFeatureModule`/`FeatureModuleExtensions` baseados em `IServiceCollection`): para manter o core com **zero dependências de runtime** e agnóstico de DI, o registro de serviços é tratado como padrão recomendado (seção 5.10), não como tipo embarcado. Um pacote satélite opcional para Microsoft.Extensions.DI fica no roadmap.
+- **Toda a camada de composição/DI** (Service Layer e `IFeatureModule`/`AddFeatures` baseados em `IServiceCollection`, e qualquer marcador de serviço): para manter o core com **zero dependências de runtime** e agnóstico de DI, a composição é tratada como **sugestão de implementação** (seções 5.9–5.10), não como tipo embarcado. Um pacote satélite opcional para Microsoft.Extensions.DI fica no roadmap.
 
 ---
 
@@ -94,33 +97,36 @@ Desenvolvedores .NET (back-end com ASP.NET Core, serviços, workers, ou apps MAU
 ### 5.1 Hierarquia de Tipos
 
 ```
-ReturnSuccessOrError<TValue>            (readonly union — C# 15)
+ReturnSuccessOrError<TValue, TError>   (readonly union — C# 15; erro parametrizado)
 ├── Success<TValue>(TValue Value)      (sealed record top-level)
-└── Failure(AppError Error)           (sealed record top-level)
+└── Failure<TError>(TError Error)      (sealed record top-level)
 
-AppError                              (interface)
-└── ErrorGeneric                       (sealed record)
+AppError                              (abstract record — base OPCIONAL dos records de erro)
+└── ErrorGeneric                       (sealed record — caso pronto p/ "inesperado")
 
-ErrorCodes                             (static class — constantes de rastreio)
+(por feature, no consumidor)  union FeatureError(CasoA, CasoB, ErrorGeneric)   ← usado como TError
 
-ParametersReturnResult                (interface)
-└── NoParams                           (sealed record)
+Parameters                            (abstract record — só dados)
+└── NoParams                           (sealed record — singleton)
 
-IDataSource<TData>                     (interface)
+IDataSource<TData, TParams>            (interface — fonte burra: dado bruto OU throw)
 
-UsecaseExecutorBase<TValue>                        (abstract class — base comum: medição + background)
-├── UsecaseBase<TValue>                            (abstract class — só processamento)
-└── UsecaseBaseCallData<TValue, TData>             (abstract class — fetch + processamento)
+IRepository<TData, TParams, TError>            (interface — fronteira: ReturnSuccessOrError<TData, TError>)
+└── RepositoryBase<TData, TParams, TError>     (abstract class — captura + MapError ABSTRATO)
 
-IFeatureService                         (interface — marcador para Service Layer; zero dependência)
+UsecaseExecutorBase<TValue, TError>                               (abstract class — base comum: medição + background + OnUnexpected abstrato)
+├── UsecaseBase<TValue, TParams, TError>                          (abstract class — só processamento)
+└── UsecaseBaseCallData<TValue, TData, TParams, TError>           (abstract class — fetch via Repository + processamento)
+
+(Service Layer / composição NÃO mora no core — é sugestão de implementação, seções 5.9–5.10)
 
 Unit                                   (sealed class — singleton)
 Nil                                    (sealed class — singleton)
 ```
 
-### 5.2 `ReturnSuccessOrError<TValue>` — Tipo Central
+### 5.2 `ReturnSuccessOrError<TValue, TError>` — Tipo Central
 
-União discriminada implementada como **`union` nativo do C# 15** sobre dois `sealed record` **top-level**. O `union` **fecha a hierarquia** na linguagem: o compilador prova a exaustividade do `switch`/`Match` — não há caso default nem subtipo externo possível. Os casos são `record`s, permitindo desconstrução posicional e padrões de propriedade no `switch`.
+União discriminada implementada como **`union` nativo do C# 15** sobre dois `sealed record` **top-level**. O **erro é parametrizado** (`TError`): cada feature fecha o seu conjunto de erros possíveis num `union` próprio, usado como `TError`. Assim o `switch`/`Match` sobre o erro é **exaustivo, sem braço `_`** — o compilador obriga a cobrir todos os erros que o `Repository` e o `Process` daquela feature podem produzir.
 
 ```csharp
 namespace ReturnSuccessOrError;
@@ -128,52 +134,49 @@ namespace ReturnSuccessOrError;
 /// <summary>Resultado bem-sucedido, carregando o valor de tipo <typeparamref name="TValue"/>.</summary>
 public sealed record Success<TValue>(TValue Value);
 
-/// <summary>Resultado com falha, carregando um <see cref="AppError"/>.</summary>
-public sealed record Failure(AppError Error);
+/// <summary>Resultado com falha, carregando um erro de tipo <typeparamref name="TError"/>.</summary>
+public sealed record Failure<TError>(TError Error);
 
-public readonly union ReturnSuccessOrError<TValue>(Success<TValue>, Failure)
+public readonly union ReturnSuccessOrError<TValue, TError>(Success<TValue>, Failure<TError>)
 {
-    // Criação por conversão implícita (ex.: return value;  /  return parameters.Error;).
-    // Não há fábricas Ok/Err públicas: o consumidor nunca constrói a união, só a consome.
-    public static implicit operator ReturnSuccessOrError<TValue>(TValue value) => new Success<TValue>(value);
-    public static implicit operator ReturnSuccessOrError<TValue>(AppError error) => new Failure(error);
+    // Criação por conversão implícita (ex.: return value;  /  return error;).
+    public static implicit operator ReturnSuccessOrError<TValue, TError>(TValue value) => new Success<TValue>(value);
+    public static implicit operator ReturnSuccessOrError<TValue, TError>(TError error) => new Failure<TError>(error);
 
     /// <summary>Consumo exaustivo: o compilador prova a exaustividade — sem caso default.</summary>
     public TResult Match<TResult>(
         Func<TValue, TResult> onSuccess,
-        Func<AppError, TResult> onError) => this switch
+        Func<TError, TResult> onError) => this switch
     {
         Success<TValue> success => onSuccess(success.Value),
-        Failure failure => onError(failure.Error),
+        Failure<TError> failure => onError(failure.Error),
     };
 }
 ```
 
-**Padrões de consumo:**
+**Padrões de consumo** (com um `union` de erro da feature, ex.: `union LoginError(InvalidCredentials, AccountLocked, ErrorGeneric)`):
 
 ```csharp
-// 1) Via Match (recomendado — exaustivo por construção)
+// Match: cobre sucesso e cada caso de erro — exaustivo, SEM _
 string message = result.Match(
     onSuccess: value => $"OK: {value}",
-    onError:   error => $"Erro: {error.Message}");
-
-// 2) Via switch expression (exaustivo: o union dispensa caso default)
-string message = result switch
-{
-    Success<string>(var value) => $"OK: {value}",
-    Failure(var error) => $"Erro: {error.Message}",
-};
+    onError:   e => e switch
+    {
+        InvalidCredentials => "credenciais inválidas",
+        AccountLocked      => "conta bloqueada",
+        ErrorGeneric g     => $"inesperado: {g.Message}",
+    });
 ```
 
-> **Criação só por conversão implícita:** não há fábricas `Ok`/`Err` públicas. A união nasce de um `return value;` (→ `Success`) ou `return error;` (→ `Failure`), tanto no `Process` do consumidor quanto na base da lib. O consumidor nunca constrói a união — só a consome via `Match` ou `switch` nativo.
+> **Duplo salto de conversão (pegadinha):** C# não encadeia duas conversões implícitas. Um caso (ex.: `InvalidCredentials`) converte implicitamente para o `union` `LoginError`; e `LoginError` converte para o `ReturnSuccessOrError`. Mas `return new InvalidCredentials();` de um `Process` que retorna `ReturnSuccessOrError<…, LoginError>` exige **dois** saltos → não compila. Escreva `return (LoginError)new InvalidCredentials();`. No `MapError`/`OnUnexpected` o problema não ocorre (o retorno já é o `union`).
 >
-> **Igualdade por valor:** o `union` (struct) recebe `Equals`/`GetHashCode` por valor, e os casos `Success`/`Failure`, por serem `record`s, também — duas conversões `(ReturnSuccessOrError<int>)1` são iguais entre si.
+> **Igualdade por valor:** o `union` (struct) recebe `Equals`/`GetHashCode` por valor, e os casos `Success`/`Failure`, por serem `record`s, também.
 >
 > **Pegadinha (struct wrapper):** o `union` é um struct que encapsula o caso. `GetType()` devolve o tipo do **union**, não de `Success`/`Failure`; e `is Failure` sobre uma referência `object` (boxed) dá `false`. Verifique o caso por pattern matching com o tipo estático do union (`result is Failure f`), nunca por `GetType()`/`ShouldBeOfType`. Ver `tests/ResultAssertions.cs`.
 
-### 5.3 `AppError` — Contrato de Erro
+### 5.3 `AppError` — Base Opcional dos Erros + `union` por Feature
 
-`AppError` é um **`abstract record`** (não interface): todo erro é, por contrato, um valor imutável com igualdade por valor. `WithMessage` é implementado **uma única vez** na base — o operador `with` usa o clone virtual sintetizado do `record`, que despacha para o subtipo real, preservando o tipo concreto e os campos extras. Subtipos não reimplementam nada.
+O erro de cada feature é um **conjunto fechado** (um `union`). `AppError` é uma **base opcional** dos records de erro: herdar dela dá `Message`, igualdade por valor e `WithMessage` (que preserva o tipo concreto). `WithMessage` é implementado **uma única vez** na base via o clone virtual sintetizado do `record`. Herdar de `AppError` é conveniência — `TError` pode ser qualquer tipo.
 
 ```csharp
 namespace ReturnSuccessOrError;
@@ -199,246 +202,197 @@ public sealed record ErrorGeneric(string Message) : AppError(Message)
 }
 ```
 
-**Erro de domínio customizado (exemplo de uso pelo consumidor):**
+**Erro fechado por feature (o `union` é `TError`).** Cada feature declara, na sua construção, o conjunto de erros que pode produzir, agrupando os casos num `union`. É esse `union` que vai em `Failure<TError>`, dando consumo **exaustivo**.
 
 ```csharp
-// Uma linha: herda WithMessage da base, ganha igualdade por valor e preserva StatusCode.
-public sealed record ApiError(string Message, int StatusCode) : AppError(Message);
+// Os erros possíveis da feature (records — herdam de AppError por conveniência):
+public sealed record InvalidCredentials(string Message) : AppError(Message);
+public sealed record AccountLocked(string Message) : AppError(Message);
+
+// O conjunto FECHADO da feature (ErrorGeneric, da lib, como caso "inesperado"):
+public readonly union LoginError(InvalidCredentials, AccountLocked, ErrorGeneric);
+
+// Consumo exaustivo — o compilador OBRIGA a cobrir todos; sem _:
+var texto = result.Match(
+    onSuccess: v => $"OK: {v}",
+    onError: e => e switch
+    {
+        InvalidCredentials => "credenciais inválidas",
+        AccountLocked      => "conta bloqueada",
+        ErrorGeneric g     => $"inesperado: {g.Message}",
+    });
 ```
 
-> **Por que `abstract record` e não `interface`?** O erro só carrega dados — não tem comportamento próprio além de `WithMessage`, que é idêntico para todos. Forçar `record` codifica a intenção ("erro é valor imutável") no tipo e elimina o boilerplate de reimplementar `WithMessage` em cada filho. Quem precisar de um erro que não seja `record` deve usar exceção, não este contrato.
+> **Por que `AppError` é só base opcional?** Os casos do `union` precisam de uma forma comum de carregar `Message` e enriquecê-la (`WithMessage`); herdar de `AppError` resolve isso sem boilerplate. Mas a discriminação no consumo é feita pelo `union` (exaustivo), não pela hierarquia de `AppError`. `TError` poderia ser qualquer tipo.
 
-#### 5.3.1 `ErrorCodes` — Códigos de Rastreio (constantes)
+> **`ErrorCodes`/`ErrorTrace` foram removidos.** Existiam para anexar códigos (`DataSourceCatch`/`BackgroundCatch`) no catch automático da base. No modelo de erro fechado não há catch que fabrique um erro genérico: a tradução é feita pelo `MapError` (exceção técnica) e pelo `OnUnexpected` (bug), ambos retornando um caso do `TError` escolhido pelo consumidor.
 
-Os códigos que a biblioteca anexa às mensagens ao capturar exceções **não** são literais mágicos espalhados pelo código: ficam centralizados em constantes nomeadas e descritivas. Isso dá um nome único de verdade (o consumidor referencia `ErrorCodes.DataSourceCatch` em testes/filtros em vez de copiar a string) e torna os códigos coerentes entre si (`DataSourceCatch` ↔ `BackgroundCatch`, ambos no padrão `<Origem>Catch`).
+### 5.4 `Parameters` — Contrato de Parâmetros (só dados)
+
+Como `AppError`, `Parameters` é um **`abstract record`**: parâmetros são valores imutáveis que **apenas carregam dados**. Diferente da versão anterior (`ParametersReturnResult`, que carregava o `AppError`), o erro foi **separado dos parâmetros** — o tratamento de falha é decidido por camada (o `Repository` traduz exceções via `MapError`; o `Process` devolve erros de negócio). O mesmo objeto de parâmetros atravessa as três camadas.
 
 ```csharp
 namespace ReturnSuccessOrError;
 
-/// <summary>
-/// Códigos de rastreio anexados às mensagens de erro pela infraestrutura da
-/// biblioteca ao converter exceções em <see cref="AppError"/>. Públicos para
-/// permitir asserções e filtros sem depender de strings literais.
-/// </summary>
-public static class ErrorCodes
+public abstract record Parameters;
+```
+
+**Implementação concreta `NoParams`** (singleton, para casos de uso sem entrada):
+
+```csharp
+namespace ReturnSuccessOrError;
+
+public sealed record NoParams : Parameters
 {
-    /// <summary>Exceção lançada pela fonte de dados durante o fetch (fase 1).</summary>
-    public const string DataSourceCatch = "DataSourceCatch";
-
-    /// <summary>Exceção lançada por <c>Process</c> ao rodar em background (fase 3).</summary>
-    public const string BackgroundCatch = "BackgroundCatch";
-}
-```
-
-> A mensagem final fica, por exemplo: `Falha ao buscar vendas - Cod. DataSourceCatch --- Catch: System.InvalidOperationException: ...`. O prefixo `Cod.` é mantido por legibilidade; o token após ele é sempre uma constante de `ErrorCodes`.
-
-### 5.4 `ParametersReturnResult` — Contrato de Parâmetros
-
-Como `AppError`, `ParametersReturnResult` é um **`abstract record`**: parâmetros são valores imutáveis que apenas carregam dados (incluindo o `AppError` a usar em caso de falha). Subtipos passam o erro à base via `: ParametersReturnResult(Error)`.
-
-```csharp
-namespace ReturnSuccessOrError;
-
-public abstract record ParametersReturnResult(AppError Error);
-```
-
-**Implementação concreta `NoParams`:**
-
-```csharp
-namespace ReturnSuccessOrError;
-
-public sealed record NoParams : ParametersReturnResult
-{
-    // Sem erro informado, fornece um ErrorGeneric default não-nulo à base.
-    public NoParams(AppError? error = null)
-        : base(error ?? new ErrorGeneric("NoParams: unspecified generic error")) { }
+    private NoParams() { }
+    public static NoParams Value { get; } = new();
 }
 ```
 
 **Parâmetro customizado (exemplo de uso pelo consumidor):**
 
 ```csharp
-// Campo próprio (N) + o Error exigido pela base.
-public sealed record FibonacciParameters(int N, AppError Error) : ParametersReturnResult(Error);
+// Só dados — nenhum AppError embutido.
+public sealed record FibonacciParameters(int N) : Parameters;
 ```
 
-### 5.5 `IDataSource<TData>` — Contrato de Fonte de Dados
+### 5.5 `IDataSource<TData, TParams>` — Fonte de Dados (camada burra)
 
 ```csharp
 namespace ReturnSuccessOrError;
 
-public interface IDataSource<TData>
+public interface IDataSource<TData, TParams>
+    where TParams : Parameters
 {
     /// <summary>
-    /// Executa a chamada externa e devolve o dado bruto, ou lança o
-    /// <see cref="AppError"/> dos parâmetros (como exceção) em caso de falha.
+    /// Executa a chamada externa e devolve o dado bruto, ou LANÇA uma exceção técnica
+    /// em caso de falha. A tradução num erro de domínio é feita pelo Repository.
     /// </summary>
     Task<TData> CallAsync(
-        ParametersReturnResult parameters,
+        TParams parameters,
         CancellationToken cancellationToken = default);
 }
 ```
 
-> **Convenção:** em caso de falha, a fonte de dados lança uma exceção. A classe base a captura e a converte em `Failure`. O `CancellationToken` é idiomático em .NET e propagado em todo o fluxo.
+> **Convenção:** a fonte de dados é **burra** — não tem conhecimento de domínio. Em caso de falha, lança uma exceção técnica; quem a captura e traduz é o `Repository` (§5.5.1). O `CancellationToken` é idiomático em .NET e propagado em todo o fluxo.
 
-### 5.6 `UsecaseBase<TValue>` — Caso de Uso de Lógica Pura
+### 5.5.1 `IRepository<TData, TParams, TError>` / `RepositoryBase` — Fronteira (Anti-Corruption Layer)
+
+O repositório é a **fronteira** entre a infraestrutura burra e o domínio. Diferente do `IDataSource`, ele **nunca lança**: devolve sempre um `ReturnSuccessOrError<TData, TError>` — o dado bruto como `Success` ou a exceção já traduzida num dos erros do `union` da feature como `Failure`. `MapError` é **abstrato**: o repositório é obrigado a mapear toda exceção para um caso previsto.
+
+```csharp
+namespace ReturnSuccessOrError;
+
+public interface IRepository<TData, TParams, TError>
+    where TParams : Parameters
+{
+    Task<ReturnSuccessOrError<TData, TError>> CallAsync(
+        TParams parameters,
+        CancellationToken cancellationToken = default);
+}
+
+public abstract class RepositoryBase<TData, TParams, TError> : IRepository<TData, TParams, TError>
+    where TParams : Parameters
+{
+    private readonly IDataSource<TData, TParams> _dataSource;
+
+    protected RepositoryBase(IDataSource<TData, TParams> dataSource) =>
+        _dataSource = dataSource;
+
+    public async Task<ReturnSuccessOrError<TData, TError>> CallAsync(
+        TParams parameters, CancellationToken cancellationToken = default)
+    {
+        try   { return await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false); } // TData -> Success
+        catch (Exception exception) { return MapError(exception, parameters); }                            // TError -> Failure
+    }
+
+    /// <summary>Traduz uma exceção da fonte num caso do union TError. ABSTRATO: obrigatório.</summary>
+    protected abstract TError MapError(Exception exception, TParams parameters);
+}
+```
+
+**Repository de uma feature (o consumidor só implementa `MapError`):**
+
+```csharp
+public sealed class ProdutosRepository(IDataSource<IReadOnlyList<Produto>, ProdutosParams> ds)
+    : RepositoryBase<IReadOnlyList<Produto>, ProdutosParams, ProdutosError>(ds)
+{
+    // ProdutosError = union(ApiUnavailable, Timeout, ErrorGeneric)
+    protected override ProdutosError MapError(Exception ex, ProdutosParams p) => ex switch
+    {
+        HttpRequestException => new ApiUnavailable("API indisponível", 503),
+        TimeoutException     => new Timeout("tempo esgotado"),
+        _                    => new ErrorGeneric($"inesperado: {ex.Message}"), // braço _ → caso "inesperado"
+    };
+}
+```
+
+> **`MapError` é `abstract`** (não virtual): como não há erro universal, o repositório é obrigado a traduzir toda exceção num caso do `TError`. O `switch` interno costuma ter um braço `_` que cai num caso "inesperado" (ex.: `ErrorGeneric`).
+
+> **Base comum `UsecaseExecutorBase<TValue, TError>`.** A medição (`MeasuredAsync`), o despacho ao thread pool (`ProcessStageAsync`) e o `OnUnexpected(Exception)` **abstrato** são compartilhados pelos dois casos de uso. Em **ambos** os modos (direto e background), uma exceção inesperada no `Process` é convertida via `OnUnexpected` num caso do `TError` — o `Process` **nunca propaga** exceção.
+
+### 5.6 `UsecaseBase<TValue, TParams, TError>` — Caso de Uso de Lógica Pura
 
 Para regras de negócio que não dependem de fonte de dados externa.
 
 ```csharp
 namespace ReturnSuccessOrError;
 
-using System.Diagnostics;
-
-public abstract class UsecaseBase<TValue>
+public abstract class UsecaseBase<TValue, TParams, TError> : UsecaseExecutorBase<TValue, TError>
+    where TParams : Parameters
 {
-    /// <summary>Se verdadeiro, o processamento roda no thread pool (Task.Run).</summary>
-    public bool RunInBackground { get; init; }
-
-    /// <summary>Se verdadeiro, mede e registra o tempo de execução.</summary>
-    public bool MonitorExecutionTime { get; init; }
-
     /// <summary>Regra de negócio implementada pela subclasse.</summary>
-    protected abstract ReturnSuccessOrError<TValue> Process(
-        ParametersReturnResult parameters);
+    protected abstract ReturnSuccessOrError<TValue, TError> Process(TParams parameters);
 
-    public async Task<ReturnSuccessOrError<TValue>> CallAsync(
-        ParametersReturnResult parameters,
-        CancellationToken cancellationToken = default)
-    {
-        if (!MonitorExecutionTime)
-            return await RunStageAsync(parameters, cancellationToken).ConfigureAwait(false);
-
-        var startTimestamp = Stopwatch.GetTimestamp();
-        var result = await RunStageAsync(parameters, cancellationToken).ConfigureAwait(false);
-        LogTime(GetType().Name, Stopwatch.GetElapsedTime(startTimestamp), RunInBackground);
-        return result;
-    }
-
-    private Task<ReturnSuccessOrError<TValue>> RunStageAsync(
-        ParametersReturnResult parameters,
-        CancellationToken cancellationToken)
-    {
-        if (!RunInBackground)
-            return Task.FromResult(Process(parameters));
-
-        return Task.Run<ReturnSuccessOrError<TValue>>(() =>
-        {
-            try { return Process(parameters); }
-            catch (Exception ex)
-            {
-                // AppError -> Failure (conversão implícita); Task.Run<...> anotado fixa o tipo.
-                return parameters.Error.WithMessage(
-                    $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}");
-            }
-        }, cancellationToken);
-    }
-
-    private static void LogTime(string name, TimeSpan elapsed, bool background) =>
-        Debug.WriteLine($"[ReturnSuccessOrError] Execution Time {name} " +
-                        $"({(background ? "Background" : "Direct")}): {elapsed.TotalMilliseconds:F2}ms");
+    public Task<ReturnSuccessOrError<TValue, TError>> CallAsync(
+        TParams parameters,
+        CancellationToken cancellationToken = default) =>
+        MeasuredAsync(() => ProcessStageAsync(() => Process(parameters), cancellationToken));
 }
 ```
 
-### 5.7 `UsecaseBaseCallData<TValue, TData>` — Caso de Uso com Fonte de Dados
+### 5.7 `UsecaseBaseCallData<TValue, TData, TParams, TError>` — Caso de Uso com Repositório
 
-Para regras de negócio que buscam dados externos e os processam.
+Para regras de negócio que buscam dados externos e os processam. **Depende de `IRepository`** (não de `IDataSource`) — é o que torna o usecase portável.
 
 ```csharp
 namespace ReturnSuccessOrError;
 
-using System.Diagnostics;
-
-public abstract class UsecaseBaseCallData<TValue, TData>
+public abstract class UsecaseBaseCallData<TValue, TData, TParams, TError> : UsecaseExecutorBase<TValue, TError>
+    where TParams : Parameters
 {
-    private readonly IDataSource<TData> _dataSource;
+    private readonly IRepository<TData, TParams, TError> _repository;
 
-    /// <summary>Afeta SOMENTE o processamento; a busca de dados nunca vai para background.</summary>
-    public bool RunInBackground { get; init; }
-
-    /// <summary>Mede busca + processamento.</summary>
-    public bool MonitorExecutionTime { get; init; }
-
-    protected UsecaseBaseCallData(IDataSource<TData> dataSource) =>
-        _dataSource = dataSource;
+    protected UsecaseBaseCallData(IRepository<TData, TParams, TError> repository) =>
+        _repository = repository;
 
     /// <summary>Regra de negócio: recebe o dado bruto já carregado e os parâmetros.</summary>
-    protected abstract ReturnSuccessOrError<TValue> Process(
-        TData data,
-        ParametersReturnResult parameters);
+    protected abstract ReturnSuccessOrError<TValue, TError> Process(TData data, TParams parameters);
 
-    public async Task<ReturnSuccessOrError<TValue>> CallAsync(
-        ParametersReturnResult parameters,
-        CancellationToken cancellationToken = default)
+    public Task<ReturnSuccessOrError<TValue, TError>> CallAsync(
+        TParams parameters,
+        CancellationToken cancellationToken = default) =>
+        MeasuredAsync(() => RunAsync(parameters, cancellationToken));
+
+    private async Task<ReturnSuccessOrError<TValue, TError>> RunAsync(
+        TParams parameters, CancellationToken cancellationToken)
     {
-        if (!MonitorExecutionTime)
-            return await RunAsync(parameters, cancellationToken).ConfigureAwait(false);
+        // FASE 1 — FETCH: o repositório já devolve Success|Failure (a fronteira tratou a exceção).
+        var fetchResult = await _repository.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
 
-        var startTimestamp = Stopwatch.GetTimestamp();
-        var result = await RunAsync(parameters, cancellationToken).ConfigureAwait(false);
-        LogTime(GetType().Name, Stopwatch.GetElapsedTime(startTimestamp), RunInBackground);
-        return result;
-    }
-
-    private async Task<ReturnSuccessOrError<TValue>> RunAsync(
-        ParametersReturnResult parameters,
-        CancellationToken cancellationToken)
-    {
-        // FASE 1 — FETCH (no contexto da chamada; I/O-bound)
-        var fetchResult = await FetchAsync(parameters, cancellationToken).ConfigureAwait(false);
-
-        // FASE 2 — CURTO-CIRCUITO: switch exaustivo (union). Failure flui entre genéricos;
-        //          o Success é desconstruído por pattern matching (cast direto não é permitido em union).
+        // FASE 2 — CURTO-CIRCUITO + FASE 3 — PROCESS (delegado à base: direto ou background).
         return fetchResult switch
         {
-            Failure failure => failure,
+            Failure<TError> failure => failure,   // Failure<TError> flui entre genéricos (depende só de TError)
             Success<TData> success =>
-                await ProcessStageAsync(success.Value, parameters, cancellationToken).ConfigureAwait(false),
+                await ProcessStageAsync(() => Process(success.Value, parameters), cancellationToken)
+                    .ConfigureAwait(false),
         };
     }
-
-    private async Task<ReturnSuccessOrError<TValue>> ProcessStageAsync(
-        TData data, ParametersReturnResult parameters, CancellationToken cancellationToken)
-    {
-        // FASE 3 — PROCESS direto (CPU-bound na thread chamadora)...
-        if (!RunInBackground)
-            return Process(data, parameters);
-
-        // ...ou despachado ao thread pool. Só o background converte exceção em Failure.
-        return await Task.Run<ReturnSuccessOrError<TValue>>(() =>
-        {
-            try { return Process(data, parameters); }
-            catch (Exception ex)
-            {
-                // AppError -> Failure (conversão implícita); Task.Run<...> anotado fixa o tipo.
-                return parameters.Error.WithMessage(
-                    $"{parameters.Error.Message} - Cod. {ErrorCodes.BackgroundCatch} --- Catch: {ex}");
-            }
-        }, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<ReturnSuccessOrError<TData>> FetchAsync(
-        ParametersReturnResult parameters,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            // TData -> Success (conversão implícita)
-            return await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // AppError -> Failure (conversão implícita)
-            return parameters.Error.WithMessage(
-                $"{parameters.Error.Message} - Cod. {ErrorCodes.DataSourceCatch} --- Catch: {ex}");
-        }
-    }
-
-    private static void LogTime(string name, TimeSpan elapsed, bool background) =>
-        Debug.WriteLine($"[ReturnSuccessOrError] Execution Time {name} " +
-                        $"({(background ? "Background" : "Direct")}): {elapsed.TotalMilliseconds:F2}ms");
 }
 ```
+
+> **Sem try/catch de fetch na base do usecase.** A captura de exceção da fonte mora no `Repository` (§5.5.1). A base apenas consome o `Success|Failure` já tratado e faz o curto-circuito. Uma exceção inesperada no `Process` é convertida pela base via `OnUnexpected` (§5.5.1) — nada propaga.
 
 ### 5.8 `Unit` e `Nil`
 
@@ -460,62 +414,69 @@ public sealed class Nil
 
 | Tipo | Semântica | Uso |
 |---|---|---|
-| `Unit` | Operação sem valor de retorno (efeito colateral bem-sucedido) | `ReturnSuccessOrError<Unit>` |
-| `Nil` | `null` como resultado válido e esperado | `ReturnSuccessOrError<Nil>` |
+| `Unit` | Operação sem valor de retorno (efeito colateral bem-sucedido) | `ReturnSuccessOrError<Unit, TError>` |
+| `Nil` | `null` como resultado válido e esperado | `ReturnSuccessOrError<Nil, TError>` |
 
-### 5.9 `IFeatureService`
+### 5.9 Service Layer (sugestão de implementação — não embarcada)
 
-Interface marcadora para a camada de serviços de uma feature (Service Layer). Implementações funcionam como a "Facade de Domínio" que expõe os casos de uso públicos da feature, orquestrando-os de forma centralizada e ocultando os detalhes de implementação das camadas superiores (Controllers, Handlers).
+A camada de serviços de uma feature (Service Layer) é a "Facade de Domínio" que expõe os casos de uso públicos da feature, orquestrando-os de forma centralizada e ocultando os detalhes de implementação das camadas superiores (Controllers, Handlers). **A biblioteca não embarca tipo algum para isso** — nem mesmo um marcador. Recomenda-se **um service por feature** (não um service-deus único), cada um expondo uma interface própria no projeto do consumidor:
 
 ```csharp
-namespace ReturnSuccessOrError;
+// Definido NO PROJETO DO CONSUMIDOR (não vem da biblioteca).
+public interface IPerfilService
+{
+    Task<ReturnSuccessOrError<Perfil, PerfilError>> ObterAsync(string id, CancellationToken ct = default);
+}
 
-/// <summary>
-/// Contrato marcador para serviços de feature (Service Layer).
-/// <para>
-/// Implementações são o ponto de entrada público de uma feature, encapsulando
-/// a orquestração de um ou mais <see cref="UsecaseBase{TValue}"/> /
-/// <see cref="UsecaseBaseCallData{TValue, TData}"/>.
-/// </para>
-/// </summary>
-public interface IFeatureService;
+public sealed class PerfilService(ObterPerfilUseCase usecase) : IPerfilService
+{
+    public Task<ReturnSuccessOrError<Perfil, PerfilError>> ObterAsync(string id, CancellationToken ct = default)
+        => usecase.CallAsync(new PerfilParameters(id), ct);
+}
 ```
+
+> **Sem marcador.** Uma versão anterior embarcava `IFeatureService` (interface vazia). Foi **removida**: um marcador sem membros não padroniza nada mecanicamente e contrariava a régua "composição/DI não mora no core". Quem quiser um selo semântico define `interface IMinhaAppFeatureService {}` no próprio app — em uma linha. Fluxos cross-feature (ex.: checkout) usam uma **feature orquestradora** cujo service compõe os services de outras features (composição, não centralização).
 
 ### 5.10 Metodologia de composição de features (convenção, não tipo embarcado)
 
 > **Decisão de design.** O registro de dependências é responsabilidade da **camada de composição** (`Program.cs`/Main), não do domínio. Para manter o core com **zero dependências de runtime** e **agnóstico de container de DI**, a biblioteca **não embarca** uma interface de módulo nem extensões acopladas a `IServiceCollection`. Em vez disso, descreve um **padrão recomendado** que o consumidor implementa no seu próprio projeto, com o container que ele já usa (Microsoft.Extensions.DI, Autofac, Lamar, Pure DI etc.).
 
-O padrão "Feature Module" como **Composition Root local**: cada feature expõe um ponto único que registra seus `DataSources`, `UseCases` e o `Service`. Para quem usa `Microsoft.Extensions.DependencyInjection`, basta o consumidor definir — **no app dele** — uma interface trivial e (opcionalmente) extensões fluentes:
+O padrão **idiomático do .NET**: cada feature expõe um **método de extensão** sobre `IServiceCollection` (`AddXxxFeature()`) que registra seus `DataSources`, `Repositories`, `UseCases` e o `Service` — exatamente como o ecossistema faz (`AddControllers`, `AddDbContext`, `AddHttpClient`). Um **agregador fino** encadeia as extensões num ponto único de DI. Tudo definido **no app do consumidor**:
 
 ```csharp
 // Definido NO PROJETO DO CONSUMIDOR (não vem da biblioteca).
 // O consumidor escolhe a abstração de DI que usa — aqui, a do .NET.
 using Microsoft.Extensions.DependencyInjection;
 
-public interface IFeatureModule
+// 1) "Módulo" idiomático: um método de extensão POR FEATURE (no arquivo da feature).
+public static class PerfilServiceCollectionExtensions
 {
-    IServiceCollection RegisterServices(IServiceCollection services);
-}
-
-public static class FeatureModuleExtensions
-{
-    public static IServiceCollection AddFeature<TModule>(this IServiceCollection services)
-        where TModule : IFeatureModule, new()
-        => new TModule().RegisterServices(services);
-
-    public static IServiceCollection AddFeatures(
-        this IServiceCollection services, params IFeatureModule[] modules)
+    public static IServiceCollection AddPerfilFeature(this IServiceCollection services)
     {
-        foreach (var module in modules)
-            module.RegisterServices(services);
+        services.AddHttpClient<IPerfilDataSource, PerfilHttpDataSource>(/* baseUrl */);
+        services.AddScoped<IRepository<PerfilDto, PerfilParameters, PerfilError>, PerfilRepository>();
+        services.AddScoped<ObterPerfilUseCase>();
+        services.AddScoped<IPerfilService, PerfilService>();
         return services;
     }
 }
+
+// 2) Agregador fino: ponto ÚNICO de DI (o "controle geral" das features).
+public static class FeatureRegistration
+{
+    public static IServiceCollection AddFeatures(this IServiceCollection services)
+        => services
+            .AddPerfilFeature()
+            .AddComissaoFeature();
+            // .AddAuthFeature();   ← adicionar feature = 1 linha
+}
 ```
 
-Quem faz **Pure DI** (composição manual) ou usa outro container simplesmente registra os tipos no estilo nativo desse container — sem precisar deste padrão. O único tipo que a biblioteca fornece para essa camada é o marcador `IFeatureService` (seção 5.9), que não depende de nada.
+No `Program.cs` fica **uma linha**: `builder.Services.AddFeatures();`. Sem interface custom, sem `new XxxModule()`, **sem reflexão** (preserva a meta AOT-friendly). Quem faz **Pure DI** (composição manual) ou usa outro container simplesmente registra os tipos no estilo nativo desse container — o método de extensão é só a convenção idiomática. **Nenhum tipo dessa camada vem da biblioteca.**
 
-> **Roadmap.** Se houver demanda, um **pacote satélite opcional** `ReturnSuccessOrError.DependencyInjection` poderá fornecer `IFeatureModule`/`AddFeature` prontos para `Microsoft.Extensions.DependencyInjection` — isolando a dependência fora do core, que permanece zero-dep.
+> **Por que método de extensão e não uma interface `IFeatureModule`?** A interface de módulo (estilo Autofac) é válida e igualmente SOLID, mas **menos idiomática** em `Microsoft.Extensions.DependencyInjection`: exige instanciar módulos e introduz uma abstração que o container já resolve com `AddXxx()`. O método de extensão é o padrão que a comunidade .NET adota e que aparece no IntelliSense de `services.`.
+
+> **Roadmap.** Se houver demanda, um **pacote satélite opcional** `ReturnSuccessOrError.DependencyInjection` poderá fornecer helpers de composição prontos para `Microsoft.Extensions.DependencyInjection` — isolando a dependência fora do core, que permanece zero-dep.
 
 ---
 
@@ -533,8 +494,8 @@ O fluxo fetch → process é um "trilho": se a busca falha, o processamento é p
 ### 6.4 `Process` como método abstrato (não delegate)
 Diferente de abordagens baseadas em delegate/typedef, `Process` é um **método abstrato** sobrescrito pela subclasse — o idioma natural de polimorfismo em C#. Reduz boilerplate e é diretamente testável.
 
-### 6.5 Erro default via construtor
-`NoParams` herda de `ParametersReturnResult` com um construtor que aplica o fallback (`: base(error ?? new ErrorGeneric(...))`), fornecendo um `AppError` não-nulo quando nenhum é informado — sem expor um `Error` nullable.
+### 6.5 Tradução de erro na fronteira (`MapError`)
+O `RepositoryBase.MapError` é o ponto único de tradução de exceção técnica → erro de domínio. É **abstrato**: o repositório é obrigado a mapear toda exceção para um caso do `union` `TError` da feature (com um braço `_` para o caso "inesperado").
 
 ### 6.6 Imutabilidade com `record` + `with`
 Erros e parâmetros são imutáveis. O enriquecimento de mensagem usa `with { Message = ... }`, preservando o tipo concreto — substitui o `copyWith` manual de outras linguagens.
@@ -547,15 +508,15 @@ Toda operação é assíncrona e cooperativamente cancelável, alinhada às conv
 
 ---
 
-## 7. Fluxo de Erros e Códigos Internos
+## 7. Fluxo de Erros (todos caem num caso do `union` `TError`)
 
-| Origem | Código | Como ocorre |
+| Origem | Quem traduz | Como ocorre |
 |---|---|---|
-| Erro de negócio deliberado | — | O próprio `Process` devolve `Failure(parameters.Error.WithMessage(...))` |
-| Exceção na busca de dados | `Cod. DataSourceCatch` | `IDataSource.CallAsync` lança; capturado em `FetchAsync` e enriquecido |
-| Exceção no processamento em background | `Cod. BackgroundCatch` | `Process` lança dentro de `Task.Run`; capturado e enriquecido |
+| Erro de **negócio** deliberado | o próprio `Process` | `return (FeatureError)new AlgumCaso(...)` (lembrar do duplo salto: cast ao union) |
+| Falha de **I/O** (URL fora, timeout) | `RepositoryBase.MapError` (abstrato) | `IDataSource.CallAsync` lança exceção técnica; `MapError` a mapeia num caso do `union` |
+| Exceção **inesperada** (bug) no `Process` | `OnUnexpected(Exception)` (abstrato) | em direto **ou** background, a base captura e mapeia num caso do `union` — nada propaga |
 
-Em todos os casos de exceção, o **tipo concreto** do `AppError` é preservado via `WithMessage`, e a mensagem é enriquecida com o código de rastreio e o conteúdo da exceção (`--- Catch: {ex}`).
+Em todos os casos, o resultado é **um dos casos do `union` da feature** — por isso o consumo final é exaustivo e contempla todas as origens.
 
 ---
 
@@ -566,19 +527,20 @@ Chamador
   │  await usecase.CallAsync(parameters, ct)
   ▼
 [UsecaseBase]                          [UsecaseBaseCallData]
-  Process(parameters)                    FASE 1: await dataSource.CallAsync(...)
-   └─ direto ou Task.Run                   ├─ sucesso → Success<TData>(dado bruto)
-   └─ exceção em bg → BackgroundCatch       └─ exceção → Cod. DataSourceCatch → Failure<TData>
-                                          FASE 2: is Failure? → propaga Failure<TValue>
+  Process(parameters)                    FASE 1: await repository.CallAsync(...)
+   └─ direto ou Task.Run                   │  [RepositoryBase] try dataSource.CallAsync(...)
+   └─ exceção inesperada → OnUnexpected     │   ├─ sucesso → Success<TData>(dado bruto)
+                                          │   └─ exceção técnica → MapError → Failure<TError>
+                                          FASE 2: is Failure? → propaga Failure<TError>
                                           FASE 3: Process(dado, parameters)
                                             └─ direto ou Task.Run
-                                            └─ exceção em bg → Cod. BackgroundCatch
+                                            └─ exceção inesperada → OnUnexpected (caso do TError)
   │
   ▼
-ReturnSuccessOrError<TValue>
+ReturnSuccessOrError<TValue, TError>
   │
   ▼
-result.Match(onSuccess: ..., onError: ...)   // tratamento obrigatório
+result.Match(onSuccess: ..., onError: e => e switch { ... })   // exaustivo, sem _
 ```
 
 ---
@@ -603,8 +565,17 @@ Exceções são caras (captura de stack trace) e semanticamente representam flux
 ### 9.6 Por que `WithMessage` na interface, se `record` já tem `with`?
 `with` exige conhecer o tipo concreto. Quando se tem apenas uma referência `AppError`, `with` não está disponível. `WithMessage` é o ponto polimórfico que permite enriquecer a mensagem sem conhecer o tipo concreto, mantendo-o preservado.
 
-### 9.7 Por que o erro mora dentro de `ParametersReturnResult`?
-Garante que o erro a ser retornado em caso de falha seja decidido **pelo chamador**, de forma tipada, antes da execução. Tanto a fonte de dados quanto o `Process` têm acesso a `parameters.Error` sem precisar fabricar erros em camadas internas.
+### 9.7 Por que o erro **saiu** de `Parameters` (separação do erro)?
+Na versão anterior, `ParametersReturnResult` carregava o `AppError` a usar em caso de falha — prática incomum e anti-idiomática frente a `ErrorOr`/`FluentResults`/`MediatR`. Agora `Parameters` carrega **só dados**, e o erro é decidido **por camada**: a fonte de dados lança exceção técnica; o `Repository.MapError` a traduz no tipo de domínio adequado (a fronteira é quem conhece o significado da falha de I/O); e o `Process` devolve erros de **negócio** diretamente. Isso elimina estados ilegais (parâmetro com erro "pré-carregado" que pode nunca ser usado) e coloca a decisão do erro onde há contexto para tomá-la.
+
+### 9.7.1 Por que uma camada `Repository` entre `DataSource` e `UseCase`?
+Padrão canônico de Clean Architecture (Anti-Corruption Layer): a camada de dados retorna `Result<T>`, nunca expõe a infra ao domínio, e data sources não são acessados diretamente por casos de uso. Mantém o `DataSource` burro (testável como I/O puro), concentra a tradução de erro num único ponto (`MapError`) e, sobretudo, torna o usecase **portável** — ele depende de `IRepository`, então trocar o datasource (HTTP→cache, real→fake) não toca na regra de negócio.
+
+### 9.7.2 Por que o erro é **parametrizado** (`TError` = `union` fechado por feature)?
+Para que o tratamento final seja **obrigado pelo compilador a contemplar todos os erros** que a feature pode produzir. Se `Failure` carregasse um `AppError` aberto, o `switch` no consumo precisaria de um braço `_` — e seria fácil esquecer um caso. Fechando o conjunto num `union` por feature, o `MapError` (Repository) e o `Process`/`OnUnexpected` (UseCase) só produzem casos previstos, e o `switch`/`Match` é exaustivo. **Custo aceito:** +1 parâmetro de tipo na cadeia (`UsecaseBaseCallData` tem 4); o duplo salto de conversão no `Process` (cast ao union); e a base não fabrica mais erro genérico — por isso `MapError`/`OnUnexpected` são abstratos.
+
+### 9.7.3 Por que `OnUnexpected` (e o `Process` nunca propaga)?
+No modelo de erro fechado não existe um erro universal para a base usar quando o `Process` lança uma exceção inesperada (um bug). Em vez de propagar (deixar escapar como `throw`) ou inventar um erro, a base delega ao `OnUnexpected(Exception)` **abstrato**: o consumidor mapeia o inesperado para um caso do seu `union` (tipicamente um `ErrorGeneric`/`Unexpected`). Vale para os **dois** modos (direto e background) — o resultado é sempre um dos casos previstos, e o sistema fica robusto (nada escapa sem ser um valor de erro tratável).
 
 ### 9.8 Por que `RunInBackground` é `init` e não parâmetro de método?
 É uma característica da configuração do caso de uso (decidida na composição/DI), não da chamada individual. `init` permite definir na inicialização do objeto e mantém imutável depois.
@@ -635,22 +606,23 @@ Existem bibliotecas de "result type" em .NET. O diferencial de `ReturnSuccessOrE
 | `LanguageExt` | Programação funcional ampla em C# | Curva de aprendizado alta; escopo muito maior |
 | **`ReturnSuccessOrError`** | **Result type + caso de uso + fonte de dados + fetch/process** | **Opinativo para Clean Architecture; mínimo e sem dependências** |
 
-Pode coexistir com `MediatR`: um handler do MediatR pode delegar a um caso de uso desta biblioteca e devolver `ReturnSuccessOrError<T>`.
+Pode coexistir com `MediatR`: um handler do MediatR pode delegar a um caso de uso desta biblioteca e devolver `ReturnSuccessOrError<T, E>`.
 
 ---
 
 ## 11. Estratégia de Testes (resumo)
 
-Framework: **xUnit v3** + **NSubstitute** (mocking de `IDataSource<T>`) + **Shouldly** (asserts) + **coverlet** (cobertura).
+Framework: **xUnit v3** + **NSubstitute** (mocking de `IDataSource`/`IRepository`) + **Shouldly** (asserts) + **coverlet** (cobertura).
 
 | Área | Cenários |
 |---|---|
-| `ReturnSuccessOrError<T>` | acesso a `Success.Value`/`Failure.Error`, igualdade por valor, `Match`, `switch` nativo, exaustividade |
-| `UsecaseBase<T>` | execução direta, em background, `MonitorExecutionTime`, exceção → `Cod. BackgroundCatch`, resultado `Unit`/`Nil` |
-| `UsecaseBaseCallData<T,D>` | sucesso fetch+process, curto-circuito (process não chamado em falha de fetch), `Cod. DataSourceCatch`, paridade direto↔background, `CancellationToken` propagado |
+| `ReturnSuccessOrError<T,E>` | igualdade por valor, `Match`, `switch` nativo, **exaustividade do switch no erro (union, sem `_`)** |
+| `UsecaseBase<T,P,E>` | execução direta, em background, `MonitorExecutionTime`, erro de negócio, exceção inesperada → `OnUnexpected` (direto **e** background), resultado `Unit`/`Nil` |
+| `UsecaseBaseCallData<T,D,P,E>` | sucesso fetch+process, curto-circuito (process não chamado em `Failure` do repo), preservação do **caso concreto** do erro, `OnUnexpected`, paridade direto↔background, `CancellationToken` |
+| `RepositoryBase<D,P,E>` | sucesso (dado→`Success`), exceção→`MapError` (caso do union traduzido), braço default, `CancellationToken` propagado |
 | `AppError`/`ErrorGeneric` | comparação por valor, `WithMessage` preserva tipo concreto |
-| `NoParams` | erro default vs customizado |
-| `IDataSource<T>` | sucesso e exceção |
+| `Parameters`/`NoParams` | só-dados (igualdade por valor), singleton `NoParams.Value` |
+| `IDataSource<T,P>` | sucesso e exceção (fonte burra) |
 
 Detalhamento completo no documento `DEVELOPMENT_PLAN.md`.
 
@@ -662,7 +634,7 @@ Detalhamento completo no documento `DEVELOPMENT_PLAN.md`.
 |---|---|---|
 | Runtime | **(nenhuma)** | O core depende apenas da BCL (`System.*`) — zero pacotes de runtime, AOT puro |
 | Dev/Test | `Microsoft.NET.Test.Sdk`, `xunit.v3`, `xunit.runner.visualstudio` | Testes (xUnit v3) |
-| Dev/Test | `NSubstitute` | Mocking de `IDataSource<T>` |
+| Dev/Test | `NSubstitute` | Mocking de `IDataSource<T,P>` / `IRepository<T,P>` |
 | Dev/Test | `Shouldly` | Asserts legíveis (`.ShouldBe(...)`) |
 | Dev/Test | `coverlet.collector` | Cobertura de código (`--collect:"XPlat Code Coverage"`) |
 
@@ -683,8 +655,8 @@ Detalhamento completo no documento `DEVELOPMENT_PLAN.md`.
 
 `ReturnSuccessOrError` é uma biblioteca .NET mínima e opinativa para a camada de domínio que:
 
-1. Modela o desfecho de operações como uma **união discriminada selada** (`Success`/`Failure`), tornando o tratamento de erro obrigatório e verificável.
-2. Fornece **bases de caso de uso** que orquestram busca de dados, curto-circuito de erros e processamento — o desenvolvedor escreve apenas `Process`.
+1. Modela o desfecho de operações como uma **união discriminada selada** (`Success<TValue>`/`Failure<TError>`) com **erro parametrizado** — o tratamento de erro é obrigatório e **exaustivo** (o `union` por feature obriga a cobrir todos os casos, sem `_`).
+2. Fornece **bases de caso de uso** que orquestram busca de dados, curto-circuito de erros e processamento — o desenvolvedor escreve apenas `Process`, `MapError` e `OnUnexpected`.
 3. Separa **I/O (busca)** de **CPU-bound (processamento)**, permitindo despachar o processamento pesado ao thread pool com uma flag.
-4. Preserva o **tipo concreto dos erros** ao enriquecê-los, com rastreabilidade via constantes `ErrorCodes.DataSourceCatch` e `ErrorCodes.BackgroundCatch`.
+4. Concentra a tradução de erro em pontos únicos e obrigatórios: `MapError` (exceção técnica → caso do `union`) e `OnUnexpected` (bug → caso do `union`); o `Process` nunca propaga exceção.
 5. É **idiomática em .NET**: async/await, `CancellationToken`, records, pattern matching, DI por construtor, zero dependências de runtime, AOT-friendly.

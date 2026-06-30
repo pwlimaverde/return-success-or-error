@@ -9,8 +9,8 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void Success_TemIgualdadePorValor()
     {
-        ReturnSuccessOrError<string> a = "x";
-        ReturnSuccessOrError<string> b = "x";
+        ReturnSuccessOrError<string, ErrorGeneric> a = "x";
+        ReturnSuccessOrError<string, ErrorGeneric> b = "x";
 
         a.ShouldBe(b);
         a.GetHashCode().ShouldBe(b.GetHashCode());
@@ -19,8 +19,8 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void Failure_TemIgualdadePorValor()
     {
-        ReturnSuccessOrError<string> a = new ErrorGeneric("e");
-        ReturnSuccessOrError<string> b = new ErrorGeneric("e");
+        ReturnSuccessOrError<string, ErrorGeneric> a = new ErrorGeneric("e");
+        ReturnSuccessOrError<string, ErrorGeneric> b = new ErrorGeneric("e");
 
         a.ShouldBe(b);
     }
@@ -28,8 +28,8 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void SuccessEFailure_NaoSaoIguais()
     {
-        ReturnSuccessOrError<int> success = 1;
-        ReturnSuccessOrError<int> failure = new ErrorGeneric("e");
+        ReturnSuccessOrError<int, ErrorGeneric> success = 1;
+        ReturnSuccessOrError<int, ErrorGeneric> failure = new ErrorGeneric("e");
 
         success.ShouldNotBe(failure);
     }
@@ -37,7 +37,7 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void Match_ChamaRamoDeSucesso()
     {
-        ReturnSuccessOrError<int> result = 10;
+        ReturnSuccessOrError<int, ErrorGeneric> result = 10;
 
         var message = result.Match(
             onSuccess: v => $"ok:{v}",
@@ -49,7 +49,7 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void Match_ChamaRamoDeErro()
     {
-        ReturnSuccessOrError<int> result = new ErrorGeneric("falhou");
+        ReturnSuccessOrError<int, ErrorGeneric> result = new ErrorGeneric("falhou");
 
         var message = result.Match(
             onSuccess: v => $"ok:{v}",
@@ -61,30 +61,49 @@ public class ReturnSuccessOrErrorTests
     [Fact]
     public void SwitchExpression_ExaustivoPorPadrao()
     {
-        ReturnSuccessOrError<string> result = "v";
+        ReturnSuccessOrError<string, ErrorGeneric> result = "v";
 
         // union (C# 15): o compilador PROVA a exaustividade — dois braços, sem caso default.
         var text = result switch
         {
             Success<string>(var value) => $"S:{value}",
-            Failure(var error) => $"F:{error.Message}",
+            Failure<ErrorGeneric>(var error) => $"F:{error.Message}",
         };
 
         text.ShouldBe("S:v");
     }
 
     [Fact]
+    public void SwitchNoErro_SobreUnionDaFeature_ExaustivoSemDefault()
+    {
+        TestError erro = new ValidationError("inválido");
+        ReturnSuccessOrError<int, TestError> result = erro;
+
+        // O erro é um union fechado da feature → o switch é exaustivo, SEM braço _.
+        var text = result.Match(
+            onSuccess: v => $"ok:{v}",
+            onError: e => e switch
+            {
+                NotFoundError n   => $"nf:{n.Message}",
+                ValidationError v => $"val:{v.Message}",
+                UnexpectedError u => $"unx:{u.Message}",
+            });
+
+        text.ShouldBe("val:inválido");
+    }
+
+    [Fact]
     public void ConversaoImplicita_DeValor_CriaSuccess()
     {
-        ReturnSuccessOrError<int> result = 42; // implicit: TValue -> Success
+        ReturnSuccessOrError<int, ErrorGeneric> result = 42; // implicit: TValue -> Success
 
         result.ShouldBeSuccess().Value.ShouldBe(42);
     }
 
     [Fact]
-    public void ConversaoImplicita_DeAppError_CriaFailure()
+    public void ConversaoImplicita_DeErro_CriaFailure()
     {
-        ReturnSuccessOrError<int> result = new ErrorGeneric("falhou"); // implicit: AppError -> Failure
+        ReturnSuccessOrError<int, ErrorGeneric> result = new ErrorGeneric("falhou"); // implicit: TError -> Failure
 
         result.ShouldBeFailure().Error.Message.ShouldBe("falhou");
     }

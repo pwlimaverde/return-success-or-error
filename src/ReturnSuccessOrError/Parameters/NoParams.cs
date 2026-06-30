@@ -1,12 +1,13 @@
 namespace ReturnSuccessOrError;
 
 /// <summary>
-/// Parâmetros vazios, para casos de uso que não exigem entrada. Fornece um
-/// <see cref="AppError"/> default não-nulo quando nenhum erro é especificado.
+/// Parâmetros vazios, para casos de uso que não exigem entrada. Por carregar apenas
+/// dados (e não ter nenhum), é um singleton imutável reutilizável via <see cref="Value"/>.
 /// </summary>
-public sealed record NoParams : ParametersReturnResult
+public sealed record NoParams : Parameters
 {
-    /// <summary>Cria parâmetros vazios; sem erro informado, usa um <see cref="ErrorGeneric"/> default.</summary>
-    public NoParams(AppError? error = null)
-        : base(error ?? new ErrorGeneric("NoParams: unspecified generic error")) { }
+    private NoParams() { }
+
+    /// <summary>Instância compartilhada de parâmetros vazios.</summary>
+    public static NoParams Value { get; } = new();
 }

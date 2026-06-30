@@ -2,27 +2,34 @@ using ReturnSuccessOrError;
 using Shouldly;
 using Xunit;
 
-namespace ReturnSuccessOrError.Tests.Parameters;
+// Namespace sem o segmento "Parameters" para não sombrear o tipo ReturnSuccessOrError.Parameters.
+namespace ReturnSuccessOrError.Tests.ParametersDomain;
 
 public class ParametersTests
 {
     [Fact]
-    public void NoParams_SemErro_ExpoeErrorGenericDefault()
+    public void NoParams_EUmParameters()
     {
-        ParametersReturnResult p = new NoParams();
+        Parameters p = NoParams.Value;
 
-        var error = p.Error;
-
-        error.ShouldBeOfType<ErrorGeneric>();
-        error.Message.ShouldBe("NoParams: unspecified generic error");
+        p.ShouldBeOfType<NoParams>();
     }
 
     [Fact]
-    public void NoParams_ComErroCustomizado_ExpoeOErroFornecido()
+    public void NoParams_Value_ESingleton()
     {
-        var custom = new ErrorGeneric("erro específico");
-        ParametersReturnResult p = new NoParams(custom);
-
-        p.Error.ShouldBeSameAs(custom);
+        NoParams.Value.ShouldBeSameAs(NoParams.Value);
     }
+
+    [Fact]
+    public void Parametros_SoCarregamDados_ComIgualdadePorValor()
+    {
+        // Parameters é só-dados: não há mais AppError embutido (separação do erro).
+        Parameters a = new SampleParams(7, "abc");
+        Parameters b = new SampleParams(7, "abc");
+
+        a.ShouldBe(b);
+    }
+
+    private sealed record SampleParams(int N, string Text) : Parameters;
 }

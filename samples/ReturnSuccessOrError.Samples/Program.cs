@@ -6,13 +6,11 @@ using ReturnSuccessOrError.Samples.Features.CheckConnection;
 using ReturnSuccessOrError.Samples.Features.Fibonacci;
 using ReturnSuccessOrError.Samples.Features.SalesReport;
 
-// Composition Root da aplicação: registra as features pela metodologia da PRD §5.10.
-// O core não depende de DI; IFeatureModule/AddFeatures são definidos aqui, no consumidor.
+// Composition Root da aplicação: ponto ÚNICO de DI (PRD §5.9–5.10).
+// O core não depende de DI; os métodos AddXxxFeature() e o agregador AddFeatures()
+// são definidos aqui, no consumidor.
 var services = new ServiceCollection()
-    .AddFeatures(
-        new CheckConnectionModule(),
-        new FibonacciModule(),
-        new SalesReportModule());
+    .AddFeatures();
 
 await using var provider = services.BuildServiceProvider();
 
@@ -23,61 +21,79 @@ await RunSalesReportAsync(provider);
 return;
 
 // ───────────────────────────── Feature 1: CheckConnection ─────────────────────────────
-// Demonstra: sucesso, erro de NEGÓCIO (offline) e exceção de infra capturada (DataSourceCatch).
+// Demonstra: sucesso, erro de NEGÓCIO (offline, no Process) e exceção TRADUZIDA pelo
+// Repository.MapError (timeout → ConnectionTimeout) — tudo dentro do union fechado da feature.
 static async Task RunCheckConnectionAsync(IServiceProvider provider)
 {
-    Header("1) CheckConnection — UsecaseBaseCallData (3 cenários)");
+    Header("1) CheckConnection — union de erro fechado (Offline | ConnectionTimeout | ErrorGeneric)");
 
-    // Cenário A: online — resolvido via DI (módulo registra a fonte online).
-    var service = provider.GetRequiredService<CheckConnectionService>();
-    Print("online (via DI)", await service.CheckAsync());
+    var service = provider.GetRequiredService<ICheckConnectionService>();
+    Print("online (via DI)", await service.CheckAsync(), CheckConnectionErrorText.Describe);
 
-    // Cenário B: offline — erro de negócio devolvido pelo próprio Process.
-    var offline = new CheckConnectionUsecase(new FakeConnectivityDataSource(online: false));
-    Print("offline", await offline.CallAsync(
-        new CheckConnectionParameters(new ErrorGeneric("Falha ao verificar conectividade"))));
+    var offline = new CheckConnectionUsecase(
+        new CheckConnectionRepository(new FakeConnectivityDataSource(online: false)));
+    Print("offline", await offline.CallAsync(new CheckConnectionParameters()), CheckConnectionErrorText.Describe);
 
-    // Cenário C: exceção na fonte de dados — capturada e enriquecida com DataSourceCatch.
     var throwing = new CheckConnectionUsecase(
-        new FakeConnectivityDataSource(online: true, shouldThrow: true));
-    Print("exceção na fonte", await throwing.CallAsync(
-        new CheckConnectionParameters(new ErrorGeneric("Falha ao verificar conectividade"))));
+        new CheckConnectionRepository(new FakeConnectivityDataSource(online: true, shouldThrow: true)));
+    Print("exceção na fonte (→ MapError)", await throwing.CallAsync(new CheckConnectionParameters()),
+        CheckConnectionErrorText.Describe);
 }
 
 // ───────────────────────────── Feature 2: Fibonacci ─────────────────────────────
-// Demonstra: UsecaseBase com RunInBackground = true (cálculo CPU-bound no thread pool).
 static async Task RunFibonacciAsync(IServiceProvider provider)
 {
-    Header("2) Fibonacci — UsecaseBase com RunInBackground");
+    Header("2) Fibonacci — UsecaseBase (lógica pura) com RunInBackground");
 
-    var service = provider.GetRequiredService<FibonacciService>();
+    var service = provider.GetRequiredService<IFibonacciService>();
 
-    Print("Fib(35) em background", await service.CalculateAsync(35));
-    Print("Fib(-1) inválido", await service.CalculateAsync(-1));
+    Print("Fib(35) em background", await service.CalculateAsync(35), FibonacciErrorText.Describe);
+    Print("Fib(-1) inválido", await service.CalculateAsync(-1), FibonacciErrorText.Describe);
 }
 
 // ───────────────────────────── Feature 3: SalesReport ─────────────────────────────
-// Demonstra: fetch + process pesado; comparação direto × background com MonitorExecutionTime.
+// Demonstra PORTABILIDADE: o MESMO usecase com dois datasources (in-memory × CSV).
 static async Task RunSalesReportAsync(IServiceProvider provider)
 {
-    Header("3) SalesReport — fetch + process pesado (direto × background)");
+    Header("3) SalesReport — portabilidade (mesmo usecase, 2 datasources) + direto × background");
 
     const int rows = 50_000;
-    var dataSource = provider.GetRequiredService<IDataSource<IReadOnlyList<SalesRow>>>();
 
-    // Direto (processamento na thread chamadora).
-    var direct = new GenerateSalesReportUsecase(dataSource) { MonitorExecutionTime = true };
+    var fromMemory = new GenerateSalesReportUsecase(
+        new SalesRepository(new InMemorySalesDataSource()));
+    Print("via InMemoryDataSource", await fromMemory.CallAsync(new SalesReportParameters(rows)),
+        SalesErrorText.Describe);
+
+    var csv = BuildCsv(rows);
+    var fromCsv = new GenerateSalesReportUsecase(
+        new SalesRepository(new CsvSalesDataSource(csv)));
+    Print("via CsvDataSource (mesmo usecase!)", await fromCsv.CallAsync(new SalesReportParameters(rows)),
+        SalesErrorText.Describe);
+
+    var directRepo = new SalesRepository(new InMemorySalesDataSource());
+    var direct = new GenerateSalesReportUsecase(directRepo) { MonitorExecutionTime = true };
     var swDirect = Stopwatch.GetTimestamp();
-    var rDirect = await direct.CallAsync(new SalesReportParameters(rows, new ErrorGeneric("Falha")));
+    var rDirect = await direct.CallAsync(new SalesReportParameters(rows));
     Console.WriteLine($"   [direto]     {Stopwatch.GetElapsedTime(swDirect).TotalMilliseconds:F1}ms");
-    Print("relatório (direto)", rDirect);
+    Print("relatório (direto)", rDirect, SalesErrorText.Describe);
 
-    // Background (processamento despachado ao thread pool) — resolvido via DI.
-    var service = provider.GetRequiredService<SalesReportService>();
+    var service = provider.GetRequiredService<ISalesReportService>();
     var swBg = Stopwatch.GetTimestamp();
     var rBg = await service.GenerateAsync(rows);
     Console.WriteLine($"   [background] {Stopwatch.GetElapsedTime(swBg).TotalMilliseconds:F1}ms");
-    Print("relatório (background)", rBg);
+    Print("relatório (background)", rBg, SalesErrorText.Describe);
+}
+
+// CSV determinístico, mesmo conteúdo da fonte em memória — para a demonstração de portabilidade.
+static string BuildCsv(int rowCount)
+{
+    string[] products = ["Mouse", "Teclado", "Monitor", "Headset", "Webcam"];
+    var sb = new System.Text.StringBuilder(rowCount * 16);
+    for (var i = 0; i < rowCount; i++)
+        sb.Append(products[i % products.Length]).Append(';')
+          .Append((i % 5) + 1).Append(';')
+          .Append(50 + (i % 100)).Append('\n');
+    return sb.ToString();
 }
 
 // ───────────────────────────── Helpers de apresentação ─────────────────────────────
@@ -89,7 +105,9 @@ static void Header(string title)
     Console.WriteLine(new string('=', 70));
 }
 
-static void Print<T>(string label, ReturnSuccessOrError<T> result) =>
+// O erro é um union fechado por feature; cada feature fornece o Describe exaustivo.
+static void Print<TValue, TError>(
+    string label, ReturnSuccessOrError<TValue, TError> result, Func<TError, string> describe) =>
     Console.WriteLine(result.Match(
         onSuccess: value => $"   [OK]  {label}: {value}",
-        onError: error => $"   [ERR] {label}: {error.Message}"));
+        onError: error => $"   [ERR] {label}: {describe(error)}"));

@@ -25,21 +25,22 @@ ReturnSuccessOrError/
 │       │   ├── Unit.cs
 │       │   └── Nil.cs
 │       ├── Errors/
-│       │   ├── AppError.cs
-│       │   ├── ErrorGeneric.cs
-│       │   └── ErrorCodes.cs              # constantes de rastreio (DataSourceCatch/BackgroundCatch)
+│       │   ├── AppError.cs                      # base OPCIONAL dos records de erro
+│       │   └── ErrorGeneric.cs                  # caso pronto p/ "inesperado"
 │       ├── Parameters/
-│       │   ├── ParametersReturnResult.cs
-│       │   └── NoParams.cs
+│       │   ├── Parameters.cs                   # abstract record só-dados
+│       │   └── NoParams.cs                     # singleton NoParams.Value
 │       ├── DataSources/
-│       │   └── IDataSource.cs
+│       │   └── IDataSource.cs                  # fonte burra: IDataSource<TData, TParams>
+│       ├── Repositories/
+│       │   ├── IRepository.cs                  # fronteira: ReturnSuccessOrError<TData, TError>
+│       │   └── RepositoryBase.cs               # captura + MapError (ABSTRATO)
 │       ├── Usecases/
+│       │   ├── UsecaseExecutorBase.cs          # base comum: medição + background + OnUnexpected (abstrato)
 │       │   ├── UsecaseBase.cs
 │       │   └── UsecaseBaseCallData.cs
-│       └── Features/
-│           └── IFeatureService.cs              # marcador da Service Layer (zero dep)
-│                                               # IFeatureModule/AddFeature NÃO são embarcados:
-│                                               # são metodologia documentada (PRD 5.10)
+│       # Composição/DI (Service Layer, AddXxxFeature()/AddFeatures()) NÃO é embarcada:
+│       # é sugestão de implementação documentada (PRD 5.9–5.10), escrita no app do consumidor.
 ├── tests/
 │   └── ReturnSuccessOrError.Tests/
 │       ├── ReturnSuccessOrError.Tests.csproj
@@ -47,10 +48,12 @@ ReturnSuccessOrError/
 │       │   └── ReturnSuccessOrErrorTests.cs
 │       ├── Errors/
 │       │   └── AppErrorTests.cs
-│       ├── Parameters/
+│       ├── Parameters/                          # namespace Tests.ParametersDomain (evita colisão)
 │       │   └── ParametersTests.cs
 │       ├── DataSources/
 │       │   └── DataSourceTests.cs
+│       ├── Repositories/
+│       │   └── RepositoryTests.cs
 │       ├── Usecases/
 │       │   ├── UsecaseBaseTests.cs
 │       │   └── UsecaseBaseCallDataTests.cs
@@ -92,8 +95,8 @@ ReturnSuccessOrError/
 > design **deliberadas** do PRD. Em vez de mutar a API, suprimimos no `.editorconfig` (escopo
 > `src/ReturnSuccessOrError/**.cs`) apenas estas, com justificativa: `CA1815` (o `union` já gera
 > igualdade por valor — §5.2), `CA2225` (conversão implícita é o único idioma de criação — §5.2),
-> `CA1724` (nome do tipo = namespace), `CA1716` (membro `Error` — §5.4), `CA1040`
-> (`IFeatureService` marcador — §5.9), `CA1031` (captura de `Exception` na fronteira — §9.5) e
+> `CA1724` (nome do tipo = namespace), `CA1716` (membro `Error` — §5.4),
+> `CA1031` (captura de `Exception` na fronteira — §9.5) e
 > `CA1062` (guardas de null redundantes com nullable habilitado). Todas as demais regras seguem ativas.
 
 ### 2.2 `src/ReturnSuccessOrError/ReturnSuccessOrError.csproj`
@@ -198,17 +201,17 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 |---|---|---|---|
 | 1 | `AppError` | `Errors/AppError.cs` | — |
 | 2 | `ErrorGeneric` | `Errors/ErrorGeneric.cs` | `AppError` |
-| 2b | `ErrorCodes` | `Errors/ErrorCodes.cs` | — |
-| 3 | `ParametersReturnResult` | `Parameters/ParametersReturnResult.cs` | `AppError` |
-| 4 | `NoParams` | `Parameters/NoParams.cs` | `ParametersReturnResult`, `ErrorGeneric` |
+| 3 | `Parameters` | `Parameters/Parameters.cs` | — |
+| 4 | `NoParams` | `Parameters/NoParams.cs` | `Parameters` |
 | 5 | `Unit`, `Nil` | `Core/Unit.cs`, `Core/Nil.cs` | — |
-| 6 | `ReturnSuccessOrError<T>` | `Core/ReturnSuccessOrError.cs` | `AppError` |
-| 7 | `IDataSource<T>` | `DataSources/IDataSource.cs` | `ParametersReturnResult` |
-| 8 | `UsecaseBase<T>` | `Usecases/UsecaseBase.cs` | itens 1–6 |
-| 9 | `UsecaseBaseCallData<T,D>` | `Usecases/UsecaseBaseCallData.cs` | itens 1–7 |
-| 10 | `IFeatureService` | `Features/IFeatureService.cs` | itens 1-6, 8-9 |
+| 6 | `ReturnSuccessOrError<T,E>` | `Core/ReturnSuccessOrError.cs` | — |
+| 7 | `IDataSource<T,P>` | `DataSources/IDataSource.cs` | `Parameters` |
+| 8 | `IRepository<T,P,E>` + `RepositoryBase<T,P,E>` | `Repositories/*.cs` | itens 6,7 |
+| 9 | `UsecaseExecutorBase<T,E>` | `Usecases/UsecaseExecutorBase.cs` | item 6 |
+| 10 | `UsecaseBase<T,P,E>` | `Usecases/UsecaseBase.cs` | itens 3,9 |
+| 11 | `UsecaseBaseCallData<T,D,P,E>` | `Usecases/UsecaseBaseCallData.cs` | itens 8,9 |
 
-> `IFeatureModule`/`FeatureModuleExtensions` **não** são implementados na biblioteca: são metodologia documentada (PRD seção 5.10), entregue como exemplo nos samples e no README. Isso mantém o core com zero dependências e agnóstico de container de DI.
+> A **camada de composição/DI** (Service Layer, métodos de extensão `AddXxxFeature()` + agregador `AddFeatures()`) **não** é implementada na biblioteca: é sugestão de implementação documentada (PRD seções 5.9–5.10), entregue como exemplo nos samples e no README. Isso mantém o core com zero dependências e agnóstico de container de DI.
 >
 > O código de referência completo de cada componente está na **Seção 5 do PRD** (`docs_dev/PRD.md`). Este plano não duplica o código; usa-o como fonte de verdade.
 
@@ -216,21 +219,22 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 
 | Conceito | Nome em C# | Observação |
 |---|---|---|
-| Tipo de resultado | `ReturnSuccessOrError<TValue>` | `readonly union` (C# 15) |
+| Tipo de resultado | `ReturnSuccessOrError<TValue, TError>` | `readonly union` (C# 15); erro parametrizado |
 | Caso de sucesso | `Success<TValue>` | `sealed record` top-level, `.Value` |
-| Caso de erro | `Failure` | `sealed record` top-level, `.Error` |
-| Criação | `return value;` / `return error;` | só conversão implícita (sem fábricas públicas) |
-| Consumo | `.Match(onSuccess, onError)` / `switch` | exaustivo (provado pelo compilador) |
-| Erro | `AppError` + `ErrorGeneric` | `WithMessage` preserva tipo |
-| Parâmetros | `ParametersReturnResult` + `NoParams` | expõem `Error` |
-| Fonte de dados | `IDataSource<TData>` | `CallAsync(parameters, ct)` |
-| Caso de uso puro | `UsecaseBase<TValue>` | método abstrato `Process(parameters)` |
-| Caso de uso c/ dados | `UsecaseBaseCallData<TValue, TData>` | método abstrato `Process(data, parameters)` |
+| Caso de erro | `Failure<TError>` | `sealed record` top-level, `.Error` |
+| Criação | `return value;` / `return error;` | conversão implícita (no `Process`, cast ao union — duplo salto) |
+| Consumo | `.Match(onSuccess, onError)` + `switch` no erro | exaustivo, **sem `_`** (union por feature) |
+| Erro | `AppError` (base opcional) + `ErrorGeneric` + `union FeatureError(...)` | o `union` por feature é o `TError` |
+| Parâmetros | `Parameters` + `NoParams` | só dados; `NoParams.Value` singleton |
+| Fonte de dados | `IDataSource<TData, TParams>` | burra: `CallAsync(parameters, ct)` → dado ou throw |
+| Repositório | `IRepository<TData, TParams, TError>` + `RepositoryBase` | fronteira: `MapError` **abstrato** (exceção → caso do union) |
+| Caso de uso puro | `UsecaseBase<TValue, TParams, TError>` | `Process(parameters)` + `OnUnexpected` |
+| Caso de uso c/ dados | `UsecaseBaseCallData<TValue, TData, TParams, TError>` | recebe `IRepository`; `Process(data, parameters)` + `OnUnexpected` |
 | Flag background | `RunInBackground` (`init`) | afeta só o processamento |
 | Flag medição | `MonitorExecutionTime` (`init`) | log via `Debug.WriteLine` |
-| Códigos de erro | `ErrorCodes.DataSourceCatch` (fetch), `ErrorCodes.BackgroundCatch` (process) | constantes nomeadas; rastreabilidade |
-| Service Layer | `IFeatureService` | Interface marcadora de serviço de feature (único tipo de feature embarcado; zero dep) |
-| Composition Root | *(convenção)* | Padrão "Feature Module" documentado (PRD 5.10) — o consumidor implementa no container dele |
+| Inesperado | `OnUnexpected(Exception)` (abstrato) | bug no `Process` → caso do union (direto e background) |
+| Service Layer | *(sugestão)* | Um service por feature (Facade de Domínio) — definido no app; nada embarcado |
+| Composition Root | *(sugestão)* | Método de extensão por feature (`AddXxxFeature()`) + agregador fino (`AddFeatures()`), documentado (PRD 5.9–5.10) — o consumidor implementa no container dele |
 
 ---
 
@@ -239,7 +243,7 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 ### 4.1 Frameworks
 
 - **xUnit v3** — runner e asserts base (sobre Microsoft.Testing.Platform).
-- **NSubstitute** — substitutos para `IDataSource<T>`.
+- **NSubstitute** — substitutos para `IDataSource<T,P>` e `IRepository<T,P>`.
 - **Shouldly** — asserts legíveis (`result.ShouldBeOfType<...>()`), licença BSD/gratuita.
 - **coverlet.collector** — cobertura de código.
 
@@ -258,100 +262,111 @@ A ordem respeita as dependências entre tipos (de baixo para cima):
 - `WithMessage` em `ErrorGeneric` devolve `ErrorGeneric` com nova mensagem.
 - `WithMessage` em erro customizado preserva o tipo concreto e demais campos.
 
-**`Parameters/ParametersTests.cs`**
-- `NoParams()` sem erro → `Error` é `ErrorGeneric` com mensagem default.
-- `NoParams(erroCustom)` → `Error` é o erro fornecido.
+**`Parameters/ParametersTests.cs`** (namespace `Tests.ParametersDomain`)
+- `NoParams.Value` é singleton e é um `Parameters`.
+- Parâmetros só-dados têm igualdade por valor.
 
 **`DataSources/DataSourceTests.cs`**
 - Implementação fake retorna dado em sucesso.
-- Implementação fake lança em falha (validar via caso de uso).
+- Implementação fake lança em falha (fonte burra).
+
+**`Repositories/RepositoryTests.cs`** (usa o `union` `TestError`)
+- Sucesso: dado bruto vira `Success`.
+- Exceção da fonte → `MapError` traduz no caso correto do union.
+- Braço default do `MapError` → caso "inesperado".
+- `CancellationToken` repassado à fonte.
 
 **`Usecases/UsecaseBaseTests.cs`**
 - Execução direta retorna resultado de `Process`.
+- Erro de negócio → `Failure` do caso previsto.
 - `RunInBackground = true` retorna resultado idêntico ao direto (paridade).
-- Exceção em `Process` com background → `Failure` com `Cod. BackgroundCatch`.
+- Exceção inesperada em `Process` → `OnUnexpected` (caso do union) — **direto e background** (nada propaga).
 - `MonitorExecutionTime = true` não altera o resultado.
 - Resultado `Unit` e `Nil`.
 
 **`Usecases/UsecaseBaseCallDataTests.cs`**
-- Sucesso completo: `Process` recebe o dado do fetch e devolve `Success`.
-- **Curto-circuito**: quando o fetch lança, `Process` **não** é chamado (verificar com flag/spy).
-- Falha no fetch → `Failure` com `ErrorCodes.DataSourceCatch` e tipo de erro preservado.
-- Exceção no `Process` em background → `Cod. BackgroundCatch`.
+- Sucesso completo: `Process` recebe o dado do repositório e devolve `Success`.
+- **Curto-circuito**: quando o repositório devolve `Failure`, `Process` **não** é chamado (verificar com flag/spy).
+- Erro do repositório flui preservando o **caso concreto** do union.
+- Exceção inesperada no `Process` → `OnUnexpected` (direto e background).
 - Paridade direto ↔ background (mesmo resultado).
-- `CancellationToken` é repassado ao `IDataSource.CallAsync`.
+- `CancellationToken` é repassado ao `IRepository.CallAsync`.
 
-**`Features/FeatureTests.cs`**
-- `IFeatureService` é uma interface marcadora utilizável: um serviço de feature de exemplo pode implementá-la e ser referenciado por esse tipo.
-- (O padrão "Feature Module" / `AddFeature` é metodologia do consumidor — demonstrado nos samples, não testado como API da biblioteca.)
+> **Pegadinhas dos testes:** (1) tipos de fixture usados como argumento de tipo de mocks (ex.: `TestParams`, `TestError`) precisam ser `public` (Castle/NSubstitute); (2) o namespace de testes de parâmetros **não** pode ter o segmento `Parameters` (sombrearia o tipo `ReturnSuccessOrError.Parameters`) — usar `Tests.ParametersDomain`; (3) ler campos de um caso a partir do union exige pattern matching (helper `TestError.Text()`), não cast.
+
+**Composição (sem testes de API)**
+- A camada de composição/DI (Service Layer, métodos de extensão `AddXxxFeature()` + agregador `AddFeatures()`) é metodologia do consumidor — demonstrada nos samples, não testada como API da biblioteca (não há tipo embarcado para testar).
 
 ### 4.3 Exemplos de Teste
 
 ```csharp
 public class UsecaseBaseCallDataTests
 {
-    private sealed record TestParams(AppError Error) : ParametersReturnResult(Error);
+    // public: usado como argumento de tipo da interface mockada (Castle/NSubstitute).
+    public sealed record TestParams : Parameters;
 
-    private sealed class StringUsecase(IDataSource<int> ds, Action? onProcess = null)
-        : UsecaseBaseCallData<string, int>(ds)
+    private sealed class StringUsecase(IRepository<int, TestParams, TestError> repo, Action? onProcess = null)
+        : UsecaseBaseCallData<string, int, TestParams, TestError>(repo)
     {
-        protected override ReturnSuccessOrError<string> Process(int data, ParametersReturnResult p)
+        protected override ReturnSuccessOrError<string, TestError> Process(int data, TestParams p)
         {
             onProcess?.Invoke();
             return $"valor: {data}";
         }
+
+        protected override TestError OnUnexpected(Exception ex) => new UnexpectedError(ex.Message);
+    }
+
+    private static IRepository<int, TestParams, TestError> RepoReturning(ReturnSuccessOrError<int, TestError> result)
+    {
+        var repo = Substitute.For<IRepository<int, TestParams, TestError>>();
+        repo.CallAsync(Arg.Any<TestParams>(), Arg.Any<CancellationToken>()).Returns(result);
+        return repo;
     }
 
     [Fact]
-    public async Task CallAsync_QuandoFetchFalha_RetornaDataSourceCatch_ESemChamarProcess()
+    public async Task CallAsync_QuandoFetchFalha_CurtoCircuito_SemChamarProcess()
     {
-        // Arrange
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .ThrowsAsync(new InvalidOperationException("db down"));
-
         var processChamado = false;
-        var usecase = new StringUsecase(ds, () => processChamado = true);
+        var repo = RepoReturning((TestError)new NotFoundError("falha de fetch"));
+        var usecase = new StringUsecase(repo, () => processChamado = true);
 
-        // Act
-        var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha")));
+        var result = await usecase.CallAsync(new TestParams());
 
-        // Assert — union é struct wrapper: usar o helper (pattern matching), não ShouldBeOfType.
-        var failure = result.ShouldBeFailure();
-        failure.Error.Message.ShouldContain(ErrorCodes.DataSourceCatch);
+        // union é struct wrapper: usar o helper (pattern matching), não ShouldBeOfType.
+        var error = result.ShouldBeFailure().Error;
+        (error is NotFoundError).ShouldBeTrue();
         processChamado.ShouldBeFalse();
     }
 
     [Fact]
     public async Task CallAsync_ComSucesso_ProcessaDadoDoFetch()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .Returns(42);
+        var usecase = new StringUsecase(RepoReturning(42));
 
-        var usecase = new StringUsecase(ds);
+        var result = await usecase.CallAsync(new TestParams());
 
-        var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha")));
-
-        result.Match(
-            onSuccess: v => v,
-            onError: e => e.Message
-        ).ShouldBe("valor: 42");
+        result.ShouldBeSuccess().Value.ShouldBe("valor: 42");
     }
 
     [Fact]
     public async Task CallAsync_PropagaCancellationToken()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>()).Returns(1);
-        var usecase = new StringUsecase(ds);
+        var repo = RepoReturning(1);
+        var usecase = new StringUsecase(repo);
         using var cts = new CancellationTokenSource();
 
-        await usecase.CallAsync(new TestParams(new ErrorGeneric("x")), cts.Token);
+        await usecase.CallAsync(new TestParams(), cts.Token);
 
-        await ds.Received(1).CallAsync(Arg.Any<ParametersReturnResult>(), cts.Token);
+        await repo.Received(1).CallAsync(Arg.Any<TestParams>(), cts.Token);
     }
 }
+
+// tests/TestErrors.cs — conjunto fechado compartilhado pelos testes:
+// public sealed record NotFoundError(string Message) : AppError(Message);
+// public sealed record ValidationError(string Message) : AppError(Message);
+// public sealed record UnexpectedError(string Message) : AppError(Message);
+// public readonly union TestError(NotFoundError, ValidationError, UnexpectedError);
 ```
 
 ### 4.4 Cobertura
@@ -363,62 +378,65 @@ public class UsecaseBaseCallDataTests
 
 ## 5. Samples
 
-Três features demonstrando os modos de uso, em um único Console App (`Program.cs` executa as três em sequência). O projeto de samples também inclui um `IFeatureModule`/`FeatureModuleExtensions` **definidos localmente** (não importados da biblioteca) para demonstrar a metodologia de composição da seção 5.10 do PRD com `Microsoft.Extensions.DependencyInjection` — provando que o padrão funciona sem que o core dependa de DI.
+Três features demonstrando os modos de uso, em um único Console App (`Program.cs` executa as três em sequência). Cada feature traz um método de extensão `AddXxxFeature()` **definido localmente** (não importado da biblioteca) e um agregador `FeatureRegistration.AddFeatures()` em `Composition/`, demonstrando a metodologia de composição da seção 5.10 do PRD com `Microsoft.Extensions.DependencyInjection` — provando que o padrão funciona sem que o core dependa de DI.
 
-### 5.1 `CheckConnection` — `UsecaseBaseCallData`, 3 cenários
-- `FakeConnectivityDataSource(online, shouldThrow)`.
-- `CheckConnectionUsecase` mapeia `bool` → mensagem.
-- Demonstra: sucesso, erro de negócio (offline), exceção capturada (`ErrorCodes.DataSourceCatch`).
+Cada feature é uma **fatia vertical** na estrutura de pastas recomendada (PRD §5 / README): `Domain/{Errors,Parameters,Models,Services,UseCases}`, `DataSources/`, `Repositories/`, `Services/` e `XxxServiceCollectionExtensions.cs`. As features de lógica pura (ex.: `Fibonacci`) **não** têm `DataSources/`/`Repositories/`. Cada feature expõe um **service por interface** (`IXxxService`), registrado/resolvido pela abstração (DIP), define seu **`union` de erro** (records + `union`) com um `Describe()` exaustivo, e registra a DI num método de extensão `AddXxxFeature()`.
+
+### 5.1 `CheckConnection` — union de erro fechado, 3 cenários
+- Erros: `union CheckConnectionError(Offline, ConnectionTimeout, ErrorGeneric)`.
+- `CheckConnectionRepository.MapError`: `TimeoutException` → `ConnectionTimeout`, `_` → `ErrorGeneric`.
+- `CheckConnectionUsecase`: `bool` → mensagem ou `Offline` (negócio); `OnUnexpected` → `ErrorGeneric`.
+- Demonstra: sucesso, erro de negócio (no `Process`), exceção traduzida (no `Repository`).
 
 ```csharp
-public sealed class CheckConnectionUsecase(IDataSource<bool> ds)
-    : UsecaseBaseCallData<string, bool>(ds)
+public sealed class CheckConnectionUsecase(IRepository<bool, CheckConnectionParameters, CheckConnectionError> repo)
+    : UsecaseBaseCallData<string, bool, CheckConnectionParameters, CheckConnectionError>(repo)
 {
-    protected override ReturnSuccessOrError<string> Process(bool online, ParametersReturnResult p)
+    protected override ReturnSuccessOrError<string, CheckConnectionError> Process(bool online, CheckConnectionParameters p)
     {
         if (!online)
-            return p.Error.WithMessage("You are offline");  // AppError -> Failure
-        return "You are connected";                          // string -> Success
+            return (CheckConnectionError)new Offline("You are offline"); // -> Failure (cast ao union)
+        return "You are connected";                                      // -> Success
     }
+
+    protected override CheckConnectionError OnUnexpected(Exception ex) => new ErrorGeneric(ex.Message);
 }
 ```
 
-### 5.2 `Fibonacci` — `UsecaseBase` com `RunInBackground`
-- `FibonacciParameters(N, Error)`.
+### 5.2 `Fibonacci` — `UsecaseBase` puro com `RunInBackground`
+- Erros: `union FibonacciError(NegativeInput, ErrorGeneric)`.
 - Cálculo CPU-bound; demonstra `RunInBackground = true` despachando para o thread pool.
 
 ```csharp
-public sealed class FibonacciUsecase : UsecaseBase<long>
+public sealed class FibonacciUsecase : UsecaseBase<long, FibonacciParameters, FibonacciError>
 {
-    protected override ReturnSuccessOrError<long> Process(ParametersReturnResult p)
+    protected override ReturnSuccessOrError<long, FibonacciError> Process(FibonacciParameters p)
     {
-        var fp = (FibonacciParameters)p;
-        if (fp.N < 0)
-            return p.Error.WithMessage("N deve ser >= 0");  // AppError -> Failure
-        return Fib(fp.N);                                    // long -> Success
+        if (p.N < 0)
+            return (FibonacciError)new NegativeInput($"N deve ser >= 0 (N = {p.N})"); // -> Failure
+        return Fib(p.N);                                                                // long -> Success
     }
 
+    protected override FibonacciError OnUnexpected(Exception ex) => new ErrorGeneric(ex.Message);
     private static long Fib(int n) => n < 2 ? n : Fib(n - 1) + Fib(n - 2);
 }
 ```
 
-### 5.3 `SalesReport` — fetch + process pesado, comparativo direto × background
-- `FakeSalesDataSource(rowCount)` gera N linhas cruas (`List<Dictionary<string, object>>` ou `IReadOnlyList<SalesRow>`).
-- `GenerateSalesReportUsecase` agrega (faturamento, ticket médio, produto mais vendido).
-- Demonstra `MonitorExecutionTime = true` comparando processamento direto vs. background com 50.000 linhas.
+### 5.3 `SalesReport` — **portabilidade** + comparativo direto × background
+- Erros: `union SalesError(EmptyPeriod, InvalidCsv, ErrorGeneric)`.
+- Dois datasources (`InMemorySalesDataSource` e `CsvSalesDataSource`) — mesma forma de dado.
+- `SalesRepository` (uma fronteira) + `GenerateSalesReportUsecase` (uma regra) agregam o relatório.
+- Demonstra **portabilidade**: o mesmo usecase roda com os dois datasources, resultado idêntico.
+- Demonstra `MonitorExecutionTime = true` comparando direto vs. background com 50.000 linhas.
 
 ```csharp
-public sealed record SalesReport(
-    int TotalItems, decimal TotalRevenue, decimal AverageTicket, string TopProduct);
-
-public sealed class GenerateSalesReportUsecase(IDataSource<IReadOnlyList<SalesRow>> ds)
-    : UsecaseBaseCallData<SalesReport, IReadOnlyList<SalesRow>>(ds)
+public sealed class GenerateSalesReportUsecase(IRepository<SalesRows, SalesReportParameters, SalesError> repo)
+    : UsecaseBaseCallData<SalesReport, SalesRows, SalesReportParameters, SalesError>(repo)  // SalesRows = alias using
 {
-    protected override ReturnSuccessOrError<SalesReport> Process(
-        IReadOnlyList<SalesRow> rows, ParametersReturnResult p)
+    protected override ReturnSuccessOrError<SalesReport, SalesError> Process(SalesRows rows, SalesReportParameters p)
     {
         if (rows.Count == 0)
-            return p.Error.WithMessage("Sem vendas no período");  // AppError -> Failure
+            return (SalesError)new EmptyPeriod($"Sem vendas no período (RowCount = {p.RowCount})"); // -> Failure
 
         decimal revenue = 0; int items = 0;
         var byProduct = new Dictionary<string, decimal>();
@@ -432,6 +450,8 @@ public sealed class GenerateSalesReportUsecase(IDataSource<IReadOnlyList<SalesRo
 
         return new SalesReport(items, revenue, revenue / rows.Count, top);  // -> Success
     }
+
+    protected override SalesError OnUnexpected(Exception ex) => new ErrorGeneric(ex.Message);
 }
 ```
 
@@ -541,21 +561,26 @@ Seguir **SemVer**, com a versão **derivada da tag git** via `MinVer` (sem edita
 ### 7.3 Integração com DI (seção do README)
 
 ```csharp
-// Registro
-services.AddScoped<IDataSource<IReadOnlyList<SalesRow>>, SqlSalesDataSource>();
+// Registro das três camadas (DataSource → Repository → UseCase)
+services.AddScoped<IDataSource<SalesRows, SalesReportParameters>, SqlSalesDataSource>();
+services.AddScoped<IRepository<SalesRows, SalesReportParameters, SalesError>, SalesRepository>();
 services.AddScoped<GenerateSalesReportUsecase>(sp =>
-    new GenerateSalesReportUsecase(sp.GetRequiredService<IDataSource<IReadOnlyList<SalesRow>>>())
+    new GenerateSalesReportUsecase(sp.GetRequiredService<IRepository<SalesRows, SalesReportParameters, SalesError>>())
     { RunInBackground = true });
 
-// Consumo em um endpoint Minimal API
+// Consumo em um endpoint Minimal API — switch exaustivo sobre o union SalesError
 app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToken ct) =>
 {
-    var result = await usecase.CallAsync(
-        new SalesReportParameters(6, 2026, new ErrorGeneric("Falha ao gerar relatório")), ct);
+    var result = await usecase.CallAsync(new SalesReportParameters(50_000), ct);
 
     return result.Match(
         onSuccess: report => Results.Ok(report),
-        onError:   error  => Results.Problem(error.Message));
+        onError:   e => e switch
+        {
+            EmptyPeriod    => Results.NotFound(),
+            InvalidCsv c   => Results.UnprocessableEntity(c.Message),
+            ErrorGeneric g => Results.Problem(g.Message),
+        });
 });
 ```
 
@@ -584,16 +609,17 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 - [ ] Nullable reference types sem warnings.
 
 ### API
-- [ ] `ReturnSuccessOrError<T>` é `union` (C# 15); `Success<T>`/`Failure` top-level.
-- [ ] `Match` e `switch` nativo exaustivos (provados pelo compilador, sem caso default).
-- [ ] `AppError.WithMessage` preserva tipo concreto (coberto por teste).
-- [ ] `ParametersReturnResult` + `NoParams` com erro default.
-- [ ] `IDataSource<T>.CallAsync` com `CancellationToken`.
-- [ ] `UsecaseBase<T>` e `UsecaseBaseCallData<T,D>` com `Process` abstrato.
-- [ ] `ErrorCodes.DataSourceCatch` (fetch) e `ErrorCodes.BackgroundCatch` (process) cobertos por teste; códigos centralizados em constantes (sem literais mágicos).
-- [ ] Curto-circuito verificado (process não chamado em falha de fetch).
+- [ ] `ReturnSuccessOrError<T,E>` é `union` (C# 15); `Success<T>`/`Failure<E>` top-level.
+- [ ] `Match`/`switch` no erro **exaustivo sobre o `union` da feature, sem `_`** (coberto por teste).
+- [ ] `AppError.WithMessage` preserva tipo concreto (coberto por teste); `AppError` é base opcional.
+- [ ] `Parameters` (só dados) + `NoParams` singleton.
+- [ ] `IDataSource<T,P>.CallAsync` com `CancellationToken` (fonte burra).
+- [ ] `IRepository<T,P,E>` + `RepositoryBase` com `MapError` **abstrato** (exceção → caso do union) cobertos por teste.
+- [ ] `UsecaseBase<T,P,E>` e `UsecaseBaseCallData<T,D,P,E>` com `Process` e `OnUnexpected` abstratos; usecase depende de `IRepository`.
+- [ ] `OnUnexpected` cobre exceção inesperada no `Process` **direto e background** (nada propaga); coberto por teste.
+- [ ] Curto-circuito verificado (process não chamado quando o repositório devolve `Failure`).
 - [ ] `Unit` e `Nil` como singletons.
-- [ ] `IFeatureService` (marcador) presente; sem tipos acoplados a `IServiceCollection` no core.
+- [ ] Sem tipos de composição/DI no core (nem marcador de serviço, nem tipos acoplados a `IServiceCollection`).
 - [ ] `ConfigureAwait(false)` em todos os `await` das classes base.
 
 ### Empacotamento
@@ -620,7 +646,7 @@ app.MapGet("/sales", async (GenerateSalesReportUsecase usecase, CancellationToke
 | 1.2 | Métodos de composição (`Map`, `Bind`/`Then`, `Ensure`) | Encadeamento estilo railway |
 | 1.3 | Injeção opcional de `ILogger<T>` para `MonitorExecutionTime` | Observabilidade estruturada em produção |
 | 1.4 | Multi-targeting `netstandard2.1` | Ampliar alcance a consumidores legados |
-| 1.x | Pacote satélite opcional `ReturnSuccessOrError.DependencyInjection` (`IFeatureModule`/`AddFeature` para Microsoft.Extensions.DI) | Conveniência de composição sem acoplar o core; só para quem usa o container do .NET |
+| 1.x | Pacote satélite opcional `ReturnSuccessOrError.DependencyInjection` (helpers de composição para Microsoft.Extensions.DI) | Conveniência de composição sem acoplar o core; só para quem usa o container do .NET |
 | 2.0 | Avaliar source generator para reduzir boilerplate de casos de uso | Ergonomia, se houver demanda |
 
 ---

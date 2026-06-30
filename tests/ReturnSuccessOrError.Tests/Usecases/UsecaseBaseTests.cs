@@ -6,36 +6,40 @@ namespace ReturnSuccessOrError.Tests.Usecases;
 
 public class UsecaseBaseTests
 {
-    private sealed record TestParams(AppError Error) : ParametersReturnResult(Error);
+    private sealed record NumberParams(int N) : Parameters;
 
-    // Caso de uso que devolve o dobro do número nos parâmetros.
-    private sealed record NumberParams(int N, AppError Error) : ParametersReturnResult(Error);
-
-    private sealed class DoubleUsecase : UsecaseBase<int>
+    private sealed class DoubleUsecase : UsecaseBase<int, NumberParams, TestError>
     {
-        protected override ReturnSuccessOrError<int> Process(ParametersReturnResult parameters)
+        protected override ReturnSuccessOrError<int, TestError> Process(NumberParams p)
         {
-            var p = (NumberParams)parameters;
-            return p.N * 2;
+            if (p.N < 0)
+                return (TestError)new ValidationError("N deve ser >= 0"); // erro de negócio -> Failure
+            return p.N * 2;                                               // int -> Success
         }
+
+        protected override TestError OnUnexpected(Exception exception)
+            => new UnexpectedError(exception.Message);
     }
 
-    private sealed class ThrowingUsecase : UsecaseBase<int>
+    private sealed class ThrowingUsecase : UsecaseBase<int, NumberParams, TestError>
     {
-        protected override ReturnSuccessOrError<int> Process(ParametersReturnResult parameters)
+        protected override ReturnSuccessOrError<int, TestError> Process(NumberParams p)
             => throw new InvalidOperationException("kaboom");
+
+        protected override TestError OnUnexpected(Exception exception)
+            => new UnexpectedError($"capturado: {exception.Message}");
     }
 
-    private sealed class UnitUsecase : UsecaseBase<Unit>
+    private sealed class UnitUsecase : UsecaseBase<Unit, NoParams, TestError>
     {
-        protected override ReturnSuccessOrError<Unit> Process(ParametersReturnResult parameters)
-            => Unit.Value;
+        protected override ReturnSuccessOrError<Unit, TestError> Process(NoParams p) => Unit.Value;
+        protected override TestError OnUnexpected(Exception exception) => new UnexpectedError(exception.Message);
     }
 
-    private sealed class NilUsecase : UsecaseBase<Nil>
+    private sealed class NilUsecase : UsecaseBase<Nil, NoParams, TestError>
     {
-        protected override ReturnSuccessOrError<Nil> Process(ParametersReturnResult parameters)
-            => Nil.Value;
+        protected override ReturnSuccessOrError<Nil, TestError> Process(NoParams p) => Nil.Value;
+        protected override TestError OnUnexpected(Exception exception) => new UnexpectedError(exception.Message);
     }
 
     [Fact]
@@ -43,9 +47,19 @@ public class UsecaseBaseTests
     {
         var usecase = new DoubleUsecase();
 
-        var result = await usecase.CallAsync(new NumberParams(21, new ErrorGeneric("e")));
+        var result = await usecase.CallAsync(new NumberParams(21));
 
         result.ShouldBeSuccess().Value.ShouldBe(42);
+    }
+
+    [Fact]
+    public async Task CallAsync_ErroDeNegocio_RetornaFailureDoTipoPrevisto()
+    {
+        var usecase = new DoubleUsecase();
+
+        var result = await usecase.CallAsync(new NumberParams(-1));
+
+        (result.ShouldBeFailure().Error is ValidationError).ShouldBeTrue();
     }
 
     [Fact]
@@ -53,7 +67,7 @@ public class UsecaseBaseTests
     {
         var direto = new DoubleUsecase();
         var background = new DoubleUsecase { RunInBackground = true };
-        var p = new NumberParams(21, new ErrorGeneric("e"));
+        var p = new NumberParams(21);
 
         var rDireto = await direto.CallAsync(p);
         var rBackground = await background.CallAsync(p);
@@ -62,26 +76,27 @@ public class UsecaseBaseTests
     }
 
     [Fact]
-    public async Task CallAsync_Background_ExcecaoEmProcess_RetornaBackgroundCatch()
+    public async Task CallAsync_Background_ExcecaoInesperada_ViraOnUnexpected()
     {
         var usecase = new ThrowingUsecase { RunInBackground = true };
 
-        var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha base")));
+        var result = await usecase.CallAsync(new NumberParams(0));
 
-        var failure = result.ShouldBeFailure();
-        failure.Error.Message.ShouldContain(ErrorCodes.BackgroundCatch);
-        failure.Error.Message.ShouldContain("kaboom");
+        var error = result.ShouldBeFailure().Error;
+        (error is UnexpectedError).ShouldBeTrue();
+        error.Text().ShouldContain("kaboom");
     }
 
     [Fact]
-    public async Task CallAsync_Direto_ExcecaoEmProcess_Propaga()
+    public async Task CallAsync_Direto_ExcecaoInesperada_TambemViraOnUnexpected()
     {
-        // Contrato (PRD §5.6): em modo direto, Process não é envolto em try/catch —
-        // a exceção propaga ao chamador. Só o modo background a converte em Failure.
+        // Contrato novo (modelo TError): o Process NUNCA propaga exceção ao chamador —
+        // direto e background convertem a inesperada via OnUnexpected. Nada escapa como throw.
         var usecase = new ThrowingUsecase(); // RunInBackground = false
 
-        await Should.ThrowAsync<InvalidOperationException>(
-            () => usecase.CallAsync(new TestParams(new ErrorGeneric("e"))));
+        var result = await usecase.CallAsync(new NumberParams(0));
+
+        (result.ShouldBeFailure().Error is UnexpectedError).ShouldBeTrue();
     }
 
     [Fact]
@@ -89,7 +104,7 @@ public class UsecaseBaseTests
     {
         var usecase = new DoubleUsecase { MonitorExecutionTime = true };
 
-        var result = await usecase.CallAsync(new NumberParams(5, new ErrorGeneric("e")));
+        var result = await usecase.CallAsync(new NumberParams(5));
 
         result.ShouldBeSuccess().Value.ShouldBe(10);
     }
@@ -97,7 +112,7 @@ public class UsecaseBaseTests
     [Fact]
     public async Task CallAsync_ResultadoUnit()
     {
-        var result = await new UnitUsecase().CallAsync(new TestParams(new ErrorGeneric("e")));
+        var result = await new UnitUsecase().CallAsync(NoParams.Value);
 
         result.ShouldBeSuccess().Value.ShouldBeSameAs(Unit.Value);
     }
@@ -105,7 +120,7 @@ public class UsecaseBaseTests
     [Fact]
     public async Task CallAsync_ResultadoNil()
     {
-        var result = await new NilUsecase().CallAsync(new TestParams(new ErrorGeneric("e")));
+        var result = await new NilUsecase().CallAsync(NoParams.Value);
 
         result.ShouldBeSuccess().Value.ShouldBeSameAs(Nil.Value);
     }

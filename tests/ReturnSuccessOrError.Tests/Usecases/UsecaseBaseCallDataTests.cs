@@ -1,5 +1,4 @@
 using NSubstitute;
-using NSubstitute.ExceptionExtensions;
 using ReturnSuccessOrError;
 using Shouldly;
 using Xunit;
@@ -8,123 +7,116 @@ namespace ReturnSuccessOrError.Tests.Usecases;
 
 public class UsecaseBaseCallDataTests
 {
-    private sealed record TestParams(AppError Error) : ParametersReturnResult(Error);
+    // public: é argumento de tipo da interface mockada (NSubstitute/Castle precisa de acesso).
+    public sealed record TestParams : Parameters;
 
-    private sealed class StringUsecase(IDataSource<int> ds, Action? onProcess = null)
-        : UsecaseBaseCallData<string, int>(ds)
+    private sealed class StringUsecase(IRepository<int, TestParams, TestError> repo, Action? onProcess = null)
+        : UsecaseBaseCallData<string, int, TestParams, TestError>(repo)
     {
-        protected override ReturnSuccessOrError<string> Process(int data, ParametersReturnResult p)
+        protected override ReturnSuccessOrError<string, TestError> Process(int data, TestParams p)
         {
             onProcess?.Invoke();
             return $"valor: {data}";
         }
+
+        protected override TestError OnUnexpected(Exception exception)
+            => new UnexpectedError(exception.Message);
     }
 
-    private sealed class ThrowingProcessUsecase(IDataSource<int> ds)
-        : UsecaseBaseCallData<string, int>(ds)
+    private sealed class ThrowingProcessUsecase(IRepository<int, TestParams, TestError> repo)
+        : UsecaseBaseCallData<string, int, TestParams, TestError>(repo)
     {
-        protected override ReturnSuccessOrError<string> Process(int data, ParametersReturnResult p)
+        protected override ReturnSuccessOrError<string, TestError> Process(int data, TestParams p)
             => throw new InvalidOperationException("process-boom");
+
+        protected override TestError OnUnexpected(Exception exception)
+            => new UnexpectedError($"capturado: {exception.Message}");
     }
 
-    // Erro de domínio customizado: valida preservação de tipo no fetch-catch.
-    private sealed record ApiError(string Message, int StatusCode) : AppError(Message);
+    private static IRepository<int, TestParams, TestError> RepoReturning(ReturnSuccessOrError<int, TestError> result)
+    {
+        var repo = Substitute.For<IRepository<int, TestParams, TestError>>();
+        repo.CallAsync(Arg.Any<TestParams>(), Arg.Any<CancellationToken>()).Returns(result);
+        return repo;
+    }
 
     [Fact]
     public async Task CallAsync_ComSucesso_ProcessaDadoDoFetch()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .Returns(42);
+        var usecase = new StringUsecase(RepoReturning(42));
 
-        var usecase = new StringUsecase(ds);
-
-        var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha")));
+        var result = await usecase.CallAsync(new TestParams());
 
         result.Match(
             onSuccess: v => v,
-            onError: e => e.Message
+            onError: e => e switch
+            {
+                NotFoundError n   => n.Message,
+                ValidationError v => v.Message,
+                UnexpectedError u => u.Message,
+            }
         ).ShouldBe("valor: 42");
     }
 
     [Fact]
-    public async Task CallAsync_QuandoFetchFalha_RetornaDataSourceCatch_ESemChamarProcess()
+    public async Task CallAsync_QuandoFetchFalha_CurtoCircuito_SemChamarProcess()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .ThrowsAsync(new InvalidOperationException("db down"));
-
         var processChamado = false;
-        var usecase = new StringUsecase(ds, () => processChamado = true);
+        var repo = RepoReturning((TestError)new NotFoundError("falha de fetch"));
+        var usecase = new StringUsecase(repo, () => processChamado = true);
 
-        var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha")));
+        var result = await usecase.CallAsync(new TestParams());
 
-        var failure = result.ShouldBeFailure();
-        failure.Error.Message.ShouldContain(ErrorCodes.DataSourceCatch);
+        var error = result.ShouldBeFailure().Error;
+        (error is NotFoundError).ShouldBeTrue();
         processChamado.ShouldBeFalse(); // curto-circuito: Process não é chamado
     }
 
     [Fact]
-    public async Task CallAsync_QuandoFetchFalha_PreservaTipoConcretoDoErro()
+    public async Task CallAsync_QuandoFetchFalha_PreservaCasoConcretoDoErro()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .ThrowsAsync(new InvalidOperationException("db down"));
+        var usecase = new StringUsecase(RepoReturning((TestError)new ValidationError("inválido")));
 
-        var usecase = new StringUsecase(ds);
+        var result = await usecase.CallAsync(new TestParams());
 
-        var result = await usecase.CallAsync(new TestParams(new ApiError("falha api", 503)));
-
-        var failure = result.ShouldBeFailure();
-        var api = failure.Error.ShouldBeOfType<ApiError>();
-        api.StatusCode.ShouldBe(503);
-        api.Message.ShouldContain(ErrorCodes.DataSourceCatch);
+        var error = result.ShouldBeFailure().Error;
+        (error is ValidationError).ShouldBeTrue();
+        error.Text().ShouldBe("inválido");
     }
 
     [Fact]
-    public async Task CallAsync_Background_ExcecaoEmProcess_RetornaBackgroundCatch()
+    public async Task CallAsync_Background_ExcecaoInesperada_ViraOnUnexpected()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .Returns(1);
+        var usecase = new ThrowingProcessUsecase(RepoReturning(1)) { RunInBackground = true };
 
-        var usecase = new ThrowingProcessUsecase(ds) { RunInBackground = true };
+        var result = await usecase.CallAsync(new TestParams());
 
-        var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("falha base")));
-
-        var failure = result.ShouldBeFailure();
-        failure.Error.Message.ShouldContain(ErrorCodes.BackgroundCatch);
-        failure.Error.Message.ShouldContain("process-boom");
+        var error = result.ShouldBeFailure().Error;
+        (error is UnexpectedError).ShouldBeTrue();
+        error.Text().ShouldContain("process-boom");
     }
 
     [Fact]
-    public async Task CallAsync_Direto_ExcecaoEmProcess_Propaga()
+    public async Task CallAsync_Direto_ExcecaoInesperada_TambemViraOnUnexpected()
     {
-        // Contrato (PRD §5.7): com fetch OK e modo direto, Process não é envolto em
-        // try/catch — a exceção propaga. Só o modo background vira BackgroundCatch.
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .Returns(1);
+        // Contrato novo: com fetch OK, uma exceção inesperada no Process vira OnUnexpected
+        // tanto direto quanto em background — nada propaga.
+        var usecase = new ThrowingProcessUsecase(RepoReturning(1)); // RunInBackground = false
 
-        var usecase = new ThrowingProcessUsecase(ds); // RunInBackground = false
+        var result = await usecase.CallAsync(new TestParams());
 
-        await Should.ThrowAsync<InvalidOperationException>(
-            () => usecase.CallAsync(new TestParams(new ErrorGeneric("e"))));
+        (result.ShouldBeFailure().Error is UnexpectedError).ShouldBeTrue();
     }
 
     [Fact]
     public async Task CallAsync_ParidadeDiretoBackground()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .Returns(7);
+        var repo = RepoReturning(7);
+        var direto = new StringUsecase(repo);
+        var background = new StringUsecase(repo) { RunInBackground = true };
 
-        var direto = new StringUsecase(ds);
-        var background = new StringUsecase(ds) { RunInBackground = true };
-        var p = new TestParams(new ErrorGeneric("e"));
-
-        var rDireto = await direto.CallAsync(p);
-        var rBackground = await background.CallAsync(p);
+        var rDireto = await direto.CallAsync(new TestParams());
+        var rBackground = await background.CallAsync(new TestParams());
 
         rBackground.ShouldBe(rDireto);
     }
@@ -132,13 +124,9 @@ public class UsecaseBaseCallDataTests
     [Fact]
     public async Task CallAsync_ComMonitorExecutionTime_NaoAlteraResultado()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>())
-          .Returns(42);
+        var usecase = new StringUsecase(RepoReturning(42)) { MonitorExecutionTime = true };
 
-        var usecase = new StringUsecase(ds) { MonitorExecutionTime = true };
-
-        var result = await usecase.CallAsync(new TestParams(new ErrorGeneric("e")));
+        var result = await usecase.CallAsync(new TestParams());
 
         result.ShouldBeSuccess().Value.ShouldBe("valor: 42");
     }
@@ -146,13 +134,12 @@ public class UsecaseBaseCallDataTests
     [Fact]
     public async Task CallAsync_PropagaCancellationToken()
     {
-        var ds = Substitute.For<IDataSource<int>>();
-        ds.CallAsync(Arg.Any<ParametersReturnResult>(), Arg.Any<CancellationToken>()).Returns(1);
-        var usecase = new StringUsecase(ds);
+        var repo = RepoReturning(1);
+        var usecase = new StringUsecase(repo);
         using var cts = new CancellationTokenSource();
 
-        await usecase.CallAsync(new TestParams(new ErrorGeneric("x")), cts.Token);
+        await usecase.CallAsync(new TestParams(), cts.Token);
 
-        await ds.Received(1).CallAsync(Arg.Any<ParametersReturnResult>(), cts.Token);
+        await repo.Received(1).CallAsync(Arg.Any<TestParams>(), cts.Token);
     }
 }
