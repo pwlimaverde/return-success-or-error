@@ -11,12 +11,18 @@ namespace ReturnSuccessOrError;
 public abstract class UsecaseBase<TValue, TParams, TError> : UsecaseExecutorBase<TValue, TError>
     where TParams : Parameters
 {
-    /// <summary>Regra de negócio implementada pela subclasse.</summary>
-    protected abstract ReturnSuccessOrError<TValue, TError> Process(TParams parameters);
+    /// <summary>
+    /// Regra de negócio implementada pela subclasse. Recebe o <paramref name="cancellationToken"/>
+    /// do chamador para cancelamento cooperativo em processamento longo (cheque-o em pontos
+    /// convenientes via <c>ThrowIfCancellationRequested()</c>; ignorá-lo é válido em regras curtas).
+    /// </summary>
+    protected abstract ReturnSuccessOrError<TValue, TError> Process(
+        TParams parameters,
+        CancellationToken cancellationToken);
 
     /// <summary>Executa o caso de uso (processamento direto ou em background, com medição opcional).</summary>
     public Task<ReturnSuccessOrError<TValue, TError>> CallAsync(
         TParams parameters,
         CancellationToken cancellationToken = default) =>
-        MeasuredAsync(() => ProcessStageAsync(() => Process(parameters), cancellationToken));
+        MeasuredAsync(() => ProcessStageAsync(() => Process(parameters, cancellationToken), cancellationToken));
 }

@@ -36,11 +36,20 @@ runtime; AOT-friendly. A publicação estável aguarda o GA do .NET 11 (nov/2026
 - **`OnUnexpected(Exception)`** (`abstract` na base dos casos de uso) — converte uma exceção
   inesperada do `Process` (um bug) num caso do `TError`. O `Process` **nunca propaga** exceção:
   direto **e** background convertem via `OnUnexpected`.
+- **`Fail(error)` / `Ok(value)`** (factory `protected static` na `UsecaseExecutorBase`) — criam o
+  resultado no `Process` **sem o cast do "duplo salto"**: como o `TError` já está fixado pela base,
+  `return Fail(new AlgumCaso(...));` é a forma recomendada de retornar um erro de negócio. `Ok` é
+  conveniência simétrica — `return value;` segue válido para o caminho feliz.
 - **`RunInBackground`** / **`MonitorExecutionTime`** (`init`) — despacho opcional do processamento
   ao thread pool e medição opt-in do tempo (sem alocação), respectivamente.
+- **`OnExecutionTimeMeasured(TimeSpan)`** (hook `protected virtual` na `UsecaseExecutorBase`) —
+  ponto de observabilidade da medição: recebe o tempo quando `MonitorExecutionTime = true`. Padrão
+  `Trace.WriteLine` (funciona no binário Release publicado — `Debug.WriteLine` seria removido na
+  compilação da lib e nunca chegaria ao consumidor do NuGet); sobrescreva para plugar `ILogger`/métricas.
 - **`Unit`** e **`Nil`** — singletons distintos para "operação sem valor" e "null semântico".
-- Propagação de `CancellationToken` por toda a cadeia assíncrona; `ConfigureAwait(false)` em
-  todo `await` das classes base.
+- Propagação de `CancellationToken` por toda a cadeia assíncrona — **inclusive ao `Process`**
+  (último parâmetro), permitindo cancelamento cooperativo do processamento CPU-bound longo;
+  `ConfigureAwait(false)` em todo `await` das classes base.
 - Documentação XML completa, README (com seções de portabilidade e de erro fechado), samples
   executáveis (CheckConnection, Fibonacci, SalesReport — este demonstrando **portabilidade**: o
   mesmo usecase com dois datasources) e workflows de CI/CD (GitHub Actions).
@@ -53,13 +62,19 @@ runtime; AOT-friendly. A publicação estável aguarda o GA do .NET 11 (nov/2026
   (UseCase) só produzem casos desse union. Não há mais um erro universal que a base fabrique.
 - **`MapError` e `OnUnexpected` são abstratos.** O consumidor é obrigado a mapear toda exceção
   (técnica → `MapError`; inesperada/bug → `OnUnexpected`) para um caso do `TError`.
-- **O `Process` nunca propaga exceção.** Direto e background convertem o inesperado via
+- **O `Process` nunca propaga exceção de bug.** Direto e background convertem o inesperado via
   `OnUnexpected` — o resultado é sempre um dos casos previstos.
+- **Cancelamento não é falha de domínio.** Um `OperationCanceledException` causado pelo **token do
+  chamador** cancelado **propaga** (fronteira e base fazem rethrow via filtro `when`) em vez de
+  virar `Failure` — idioma do .NET/ASP.NET Core. O `ProcessStageAsync` checa o token antes do
+  `Process` nos **dois** modos (paridade direto↔background). Um OCE *interno* (token do chamador
+  não cancelado) é falha comum: `MapError` na fronteira, `OnUnexpected` no `Process`.
 - **Arquitetura em três camadas (`DataSource → Repository → UseCase`).** O usecase depende de
   `IRepository` (abstração), tornando-o **portável** — troca-se o datasource sem tocar na regra.
 - **Separação do erro dos parâmetros.** `Parameters` carrega só dados.
-- **Duplo salto de conversão:** C# não encadeia duas conversões implícitas; um erro de negócio no
-  `Process` precisa do cast ao union (`return (FeatureError)new Case(...);`).
+- **Duplo salto de conversão:** C# não encadeia duas conversões implícitas; retornar um caso
+  concreto do union de erro no `Process` exigiria dois saltos e não compila. Use a factory
+  `Fail(new Case(...))` (recomendado) ou o cast ao union (`return (FeatureError)new Case(...);`).
 - Como o `union` é um **struct wrapper**, `GetType()` devolve o tipo do union; verifique o caso por
   pattern matching (`is Success<T>`/`is Failure<TError>`), não por `GetType()`.
 - **Composição e DI ficam totalmente fora do core.** Nenhum tipo de composição é embarcado — nem

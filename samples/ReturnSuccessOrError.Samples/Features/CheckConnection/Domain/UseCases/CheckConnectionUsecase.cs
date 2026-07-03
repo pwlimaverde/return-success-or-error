@@ -1,15 +1,15 @@
 namespace ReturnSuccessOrError.Samples.Features.CheckConnection;
 
 /// <summary>UseCase (regra de negócio, PORTÁVEL): mapeia o estado em mensagem ou erro de negócio.</summary>
-public sealed class CheckConnectionUsecase(IRepository<bool, CheckConnectionParameters, CheckConnectionError> repo)
-    : UsecaseBaseCallData<string, bool, CheckConnectionParameters, CheckConnectionError>(repo)
+public sealed class CheckConnectionUsecase(IRepository<bool, NoParams, CheckConnectionError> repo)
+    : UsecaseBaseCallData<string, bool, NoParams, CheckConnectionError>(repo)
 {
     protected override ReturnSuccessOrError<string, CheckConnectionError> Process(
-        bool online, CheckConnectionParameters p)
+        bool online, NoParams p, CancellationToken cancellationToken)
     {
         if (!online)
-            return (CheckConnectionError)new Offline("You are offline"); // erro de negócio -> Failure
-        return "You are connected";                                      // string -> Success
+            return Fail(new Offline("You are offline")); // erro de negócio -> Failure (factory, sem cast)
+        return Ok("You are connected");                  // string -> Success
     }
 
     protected override CheckConnectionError OnUnexpected(Exception exception)

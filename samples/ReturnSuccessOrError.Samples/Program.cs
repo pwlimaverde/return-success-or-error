@@ -32,11 +32,11 @@ static async Task RunCheckConnectionAsync(IServiceProvider provider)
 
     var offline = new CheckConnectionUsecase(
         new CheckConnectionRepository(new FakeConnectivityDataSource(online: false)));
-    Print("offline", await offline.CallAsync(new CheckConnectionParameters()), CheckConnectionErrorText.Describe);
+    Print("offline", await offline.CallAsync(NoParams.Value), CheckConnectionErrorText.Describe);
 
     var throwing = new CheckConnectionUsecase(
         new CheckConnectionRepository(new FakeConnectivityDataSource(online: true, shouldThrow: true)));
-    Print("exceção na fonte (→ MapError)", await throwing.CallAsync(new CheckConnectionParameters()),
+    Print("exceção na fonte (→ MapError)", await throwing.CallAsync(NoParams.Value),
         CheckConnectionErrorText.Describe);
 }
 

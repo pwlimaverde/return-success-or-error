@@ -2,11 +2,13 @@ namespace ReturnSuccessOrError;
 
 /// <summary>
 /// Contrato da camada de dados (fronteira / <i>anti-corruption layer</i>). Diferente da
-/// <see cref="IDataSource{TData, TParams}"/> burra, o repositório <b>nunca lança</b>: devolve
-/// sempre um <see cref="ReturnSuccessOrError{TValue, TError}"/> — o dado bruto como <see cref="Success{TValue}"/>
-/// ou a exceção de infraestrutura já traduzida num dos erros do conjunto fechado da feature
-/// (<typeparamref name="TError"/>) como <see cref="Failure{TError}"/>. É a abstração da qual o
-/// caso de uso depende (DIP), o que o torna portável.
+/// <see cref="IDataSource{TData, TParams}"/> burra, o repositório <b>não lança falha de
+/// infraestrutura</b>: devolve sempre um <see cref="ReturnSuccessOrError{TValue, TError}"/> — o dado
+/// bruto como <see cref="Success{TValue}"/> ou a exceção já traduzida num dos erros do conjunto
+/// fechado da feature (<typeparamref name="TError"/>) como <see cref="Failure{TError}"/>. Única
+/// exceção: o <b>cancelamento do chamador</b> propaga como <see cref="OperationCanceledException"/>
+/// (cancelamento não é falha de domínio). É a abstração da qual o caso de uso depende (DIP), o que
+/// o torna portável.
 /// </summary>
 /// <typeparam name="TData">Tipo do dado bruto entregue à camada de domínio.</typeparam>
 /// <typeparam name="TParams">Tipo dos parâmetros (só dados) da chamada.</typeparam>

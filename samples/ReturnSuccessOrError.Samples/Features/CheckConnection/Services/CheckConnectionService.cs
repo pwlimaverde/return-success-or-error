@@ -5,5 +5,5 @@ public sealed class CheckConnectionService(CheckConnectionUsecase usecase) : ICh
 {
     public Task<ReturnSuccessOrError<string, CheckConnectionError>> CheckAsync(
         CancellationToken cancellationToken = default)
-        => usecase.CallAsync(new CheckConnectionParameters(), cancellationToken);
+        => usecase.CallAsync(NoParams.Value, cancellationToken); // sem entrada -> singleton NoParams
 }

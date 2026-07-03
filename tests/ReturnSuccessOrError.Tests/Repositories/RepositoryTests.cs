@@ -71,6 +71,39 @@ public class RepositoryTests
     }
 
     [Fact]
+    public async Task CallAsync_CancelamentoDoChamador_PropagaOCE_SemMapError()
+    {
+        // Cancelamento do CHAMADOR não é falha de domínio: a fronteira rethrow o OCE
+        // em vez de traduzi-lo num erro do union (idioma .NET / ASP.NET Core).
+        var ds = Substitute.For<IDataSource<int, TestParams>>();
+        ds.CallAsync(Arg.Any<TestParams>(), Arg.Any<CancellationToken>())
+          .ThrowsAsync(new OperationCanceledException());
+        var repo = new TranslatingRepository(ds);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => repo.CallAsync(new TestParams(), cts.Token));
+    }
+
+    [Fact]
+    public async Task CallAsync_OCEInterno_SemCancelamentoDoChamador_TraduzViaMapError()
+    {
+        // Um OCE lançado pela fonte SEM o token do chamador cancelado é falha técnica
+        // como outra qualquer — cai no MapError (braço default), não propaga.
+        var ds = Substitute.For<IDataSource<int, TestParams>>();
+        ds.CallAsync(Arg.Any<TestParams>(), Arg.Any<CancellationToken>())
+          .ThrowsAsync(new OperationCanceledException("timeout interno da fonte"));
+        var repo = new TranslatingRepository(ds);
+
+        var result = await repo.CallAsync(new TestParams()); // token default, não cancelado
+
+        var error = result.ShouldBeFailure().Error;
+        (error is UnexpectedError).ShouldBeTrue();
+        error.Text().ShouldContain("timeout interno da fonte");
+    }
+
+    [Fact]
     public async Task CallAsync_PropagaCancellationTokenParaFonte()
     {
         var ds = Substitute.For<IDataSource<int, TestParams>>();

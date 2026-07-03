@@ -25,7 +25,18 @@ public readonly union ReturnSuccessOrError<TValue, TError>(Success<TValue>, Fail
     /// <summary>Açúcar: converte um valor de sucesso diretamente (ex.: <c>return value;</c>).</summary>
     public static implicit operator ReturnSuccessOrError<TValue, TError>(TValue value) => new Success<TValue>(value);
 
-    /// <summary>Açúcar: converte um erro diretamente em falha (ex.: <c>return error;</c>).</summary>
+    /// <summary>
+    /// Açúcar: converte um erro diretamente em falha (ex.: <c>return error;</c>).
+    /// <para>
+    /// <b>Atenção (duplo salto):</b> esta conversão recebe o <b>union de erro</b> (<typeparamref name="TError"/>),
+    /// não um caso concreto dele. C# não encadeia duas conversões implícitas (caso → union de erro →
+    /// <see cref="Failure{TError}"/>), então <c>return new AlgumCaso(...);</c> não compila (CS0029).
+    /// Dentro de um <c>Process</c>, use os helpers herdados <c>Fail(error)</c>/<c>Ok(value)</c> da
+    /// <c>UsecaseExecutorBase</c> (o <typeparamref name="TError"/> já está fixado pela base — uma
+    /// única conversão). Fora dela: cast ao union (<c>(FeatureError)new AlgumCaso(...)</c>) ou
+    /// <c>new Failure&lt;FeatureError&gt;(new AlgumCaso(...))</c>. Ver PRD §5.2.
+    /// </para>
+    /// </summary>
     public static implicit operator ReturnSuccessOrError<TValue, TError>(TError error) => new Failure<TError>(error);
 
     /// <summary>Consumo exaustivo: obriga tratar sucesso e erro; o compilador prova a exaustividade.</summary>

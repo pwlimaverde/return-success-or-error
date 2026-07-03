@@ -114,7 +114,7 @@ IDataSource<TData, TParams>            (interface — fonte burra: dado bruto OU
 IRepository<TData, TParams, TError>            (interface — fronteira: ReturnSuccessOrError<TData, TError>)
 └── RepositoryBase<TData, TParams, TError>     (abstract class — captura + MapError ABSTRATO)
 
-UsecaseExecutorBase<TValue, TError>                               (abstract class — base comum: medição + background + OnUnexpected abstrato)
+UsecaseExecutorBase<TValue, TError>                               (abstract class — base comum: medição (hook virtual OnExecutionTimeMeasured) + background + OnUnexpected abstrato + factory Ok/Fail)
 ├── UsecaseBase<TValue, TParams, TError>                          (abstract class — só processamento)
 └── UsecaseBaseCallData<TValue, TData, TParams, TError>           (abstract class — fetch via Repository + processamento)
 
@@ -168,11 +168,14 @@ string message = result.Match(
     });
 ```
 
-> **Duplo salto de conversão (pegadinha):** C# não encadeia duas conversões implícitas. Um caso (ex.: `InvalidCredentials`) converte implicitamente para o `union` `LoginError`; e `LoginError` converte para o `ReturnSuccessOrError`. Mas `return new InvalidCredentials();` de um `Process` que retorna `ReturnSuccessOrError<…, LoginError>` exige **dois** saltos → não compila. Escreva `return (LoginError)new InvalidCredentials();`. No `MapError`/`OnUnexpected` o problema não ocorre (o retorno já é o `union`).
+> **Duplo salto de conversão (pegadinha):** C# não encadeia duas conversões implícitas. Um caso (ex.: `InvalidCredentials`) converte implicitamente para o `union` `LoginError`; e `LoginError` converte para o `ReturnSuccessOrError`. Mas `return new InvalidCredentials();` de um `Process` que retorna `ReturnSuccessOrError<…, LoginError>` exige **dois** saltos → não compila (`error CS0029`).
+> **Forma recomendada:** os helpers `Fail(error)` / `Ok(value)` (factory `protected static` da `UsecaseExecutorBase`). Como o `TError` já está fixado pela base, passar o caso concreto é **uma única** conversão de union no argumento (contexto isolado) — sem cadeia: `return Fail(new InvalidCredentials());`. `Ok` é simétrico e opcional (`return value;` segue válido). **Alternativa equivalente:** o cast ao union — `return (LoginError)new InvalidCredentials();`. No `MapError`/`OnUnexpected` nada disso é preciso (o retorno já é o `union`, um salto só).
 >
 > **Igualdade por valor:** o `union` (struct) recebe `Equals`/`GetHashCode` por valor, e os casos `Success`/`Failure`, por serem `record`s, também.
 >
 > **Pegadinha (struct wrapper):** o `union` é um struct que encapsula o caso. `GetType()` devolve o tipo do **union**, não de `Success`/`Failure`; e `is Failure` sobre uma referência `object` (boxed) dá `false`. Verifique o caso por pattern matching com o tipo estático do union (`result is Failure f`), nunca por `GetType()`/`ShouldBeOfType`. Ver `tests/ResultAssertions.cs`.
+>
+> **Pegadinha (`TValue` == `TError`):** se os dois argumentos de tipo forem o **mesmo tipo** (ex.: `ReturnSuccessOrError<string, string>`), as duas conversões implícitas ficam com a mesma assinatura e a criação por conversão torna-se **ambígua** (não compila). Na prática não ocorre — `TError` é um `union` de feature, nunca igual ao valor — mas, se precisar, crie os casos explicitamente (`new Success<T>(...)`/`new Failure<T>(...)` ou `Ok`/`Fail`).
 
 ### 5.3 `AppError` — Base Opcional dos Erros + `union` por Feature
 
@@ -278,7 +281,7 @@ public interface IDataSource<TData, TParams>
 
 ### 5.5.1 `IRepository<TData, TParams, TError>` / `RepositoryBase` — Fronteira (Anti-Corruption Layer)
 
-O repositório é a **fronteira** entre a infraestrutura burra e o domínio. Diferente do `IDataSource`, ele **nunca lança**: devolve sempre um `ReturnSuccessOrError<TData, TError>` — o dado bruto como `Success` ou a exceção já traduzida num dos erros do `union` da feature como `Failure`. `MapError` é **abstrato**: o repositório é obrigado a mapear toda exceção para um caso previsto.
+O repositório é a **fronteira** entre a infraestrutura burra e o domínio. Diferente do `IDataSource`, ele **não lança falha de infraestrutura**: devolve sempre um `ReturnSuccessOrError<TData, TError>` — o dado bruto como `Success` ou a exceção já traduzida num dos erros do `union` da feature como `Failure`. `MapError` é **abstrato**: o repositório é obrigado a mapear toda exceção para um caso previsto. **Única exceção do contrato:** o **cancelamento do chamador** (um `OperationCanceledException` com o token do chamador cancelado) **propaga como OCE** em vez de virar `Failure` — cancelamento não é falha de domínio (§6.8). Um OCE *interno* da fonte (sem o token do chamador cancelado) é falha técnica normal e segue para o `MapError`.
 
 ```csharp
 namespace ReturnSuccessOrError;
@@ -303,6 +306,10 @@ public abstract class RepositoryBase<TData, TParams, TError> : IRepository<TData
         TParams parameters, CancellationToken cancellationToken = default)
     {
         try   { return await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false); } // TData -> Success
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // cancelamento do CHAMADOR propaga como OCE — não é falha de domínio (§6.8)
+        }
         catch (Exception exception) { return MapError(exception, parameters); }                            // TError -> Failure
     }
 
@@ -329,7 +336,7 @@ public sealed class ProdutosRepository(IDataSource<IReadOnlyList<Produto>, Produ
 
 > **`MapError` é `abstract`** (não virtual): como não há erro universal, o repositório é obrigado a traduzir toda exceção num caso do `TError`. O `switch` interno costuma ter um braço `_` que cai num caso "inesperado" (ex.: `ErrorGeneric`).
 
-> **Base comum `UsecaseExecutorBase<TValue, TError>`.** A medição (`MeasuredAsync`), o despacho ao thread pool (`ProcessStageAsync`) e o `OnUnexpected(Exception)` **abstrato** são compartilhados pelos dois casos de uso. Em **ambos** os modos (direto e background), uma exceção inesperada no `Process` é convertida via `OnUnexpected` num caso do `TError` — o `Process` **nunca propaga** exceção.
+> **Base comum `UsecaseExecutorBase<TValue, TError>`.** A medição (`MeasuredAsync` + hook **virtual** `OnExecutionTimeMeasured(TimeSpan)`, §9.10), o despacho ao thread pool (`ProcessStageAsync`), o `OnUnexpected(Exception)` **abstrato** e as factories `Fail(error)`/`Ok(value)` (`protected static`) são compartilhados pelos dois casos de uso. Em **ambos** os modos (direto e background), uma exceção inesperada no `Process` é convertida via `OnUnexpected` num caso do `TError` — o `Process` **nunca propaga** exceção de bug. **Única exceção do contrato:** o **cancelamento do chamador** propaga como `OperationCanceledException` nos dois modos (§6.8) — o `ProcessStageAsync` checa o token antes do `Process` (paridade direto↔background) e faz rethrow de OCE cooperativo quando o token do chamador está cancelado. `Fail`/`Ok` são o caminho recomendado para criar o resultado no `Process` sem o cast do duplo salto (§5.2).
 
 ### 5.6 `UsecaseBase<TValue, TParams, TError>` — Caso de Uso de Lógica Pura
 
@@ -341,13 +348,16 @@ namespace ReturnSuccessOrError;
 public abstract class UsecaseBase<TValue, TParams, TError> : UsecaseExecutorBase<TValue, TError>
     where TParams : Parameters
 {
-    /// <summary>Regra de negócio implementada pela subclasse.</summary>
-    protected abstract ReturnSuccessOrError<TValue, TError> Process(TParams parameters);
+    /// <summary>Regra de negócio implementada pela subclasse. Recebe o token do chamador
+    /// para cancelamento cooperativo em processamento longo (ignorá-lo é válido).</summary>
+    protected abstract ReturnSuccessOrError<TValue, TError> Process(
+        TParams parameters,
+        CancellationToken cancellationToken);
 
     public Task<ReturnSuccessOrError<TValue, TError>> CallAsync(
         TParams parameters,
         CancellationToken cancellationToken = default) =>
-        MeasuredAsync(() => ProcessStageAsync(() => Process(parameters), cancellationToken));
+        MeasuredAsync(() => ProcessStageAsync(() => Process(parameters, cancellationToken), cancellationToken));
 }
 ```
 
@@ -366,8 +376,12 @@ public abstract class UsecaseBaseCallData<TValue, TData, TParams, TError> : Usec
     protected UsecaseBaseCallData(IRepository<TData, TParams, TError> repository) =>
         _repository = repository;
 
-    /// <summary>Regra de negócio: recebe o dado bruto já carregado e os parâmetros.</summary>
-    protected abstract ReturnSuccessOrError<TValue, TError> Process(TData data, TParams parameters);
+    /// <summary>Regra de negócio: recebe o dado bruto já carregado, os parâmetros e o token
+    /// do chamador para cancelamento cooperativo em processamento longo (ignorá-lo é válido).</summary>
+    protected abstract ReturnSuccessOrError<TValue, TError> Process(
+        TData data,
+        TParams parameters,
+        CancellationToken cancellationToken);
 
     public Task<ReturnSuccessOrError<TValue, TError>> CallAsync(
         TParams parameters,
@@ -385,7 +399,7 @@ public abstract class UsecaseBaseCallData<TValue, TData, TParams, TError> : Usec
         {
             Failure<TError> failure => failure,   // Failure<TError> flui entre genéricos (depende só de TError)
             Success<TData> success =>
-                await ProcessStageAsync(() => Process(success.Value, parameters), cancellationToken)
+                await ProcessStageAsync(() => Process(success.Value, parameters, cancellationToken), cancellationToken)
                     .ConfigureAwait(false),
         };
     }
@@ -503,8 +517,15 @@ Erros e parâmetros são imutáveis. O enriquecimento de mensagem usa `with { Me
 ### 6.7 Injeção de Dependência via Construtor
 A fonte de dados é injetada no construtor, compatível com `Microsoft.Extensions.DependencyInjection`. Facilita substituição por fakes/substitutes em teste.
 
-### 6.8 Async/await + `CancellationToken`
-Toda operação é assíncrona e cooperativamente cancelável, alinhada às convenções da BCL e do ASP.NET Core.
+### 6.8 Async/await + `CancellationToken` (contrato de cancelamento)
+Toda operação é assíncrona e cooperativamente cancelável, alinhada às convenções da BCL e do ASP.NET Core. O token do chamador percorre **toda** a cadeia: `CallAsync` → `IRepository` → `IDataSource` e também o **`Process`** (último parâmetro) — processamento CPU-bound longo pode cooperar via `ThrowIfCancellationRequested()`.
+
+**Cancelamento não é falha de domínio — é a "terceira via" idiomática do .NET:**
+- Um `OperationCanceledException` causado pelo **token do chamador** cancelado **propaga como exceção** (não vira `Failure`): a fronteira (`RepositoryBase`) e a base do usecase (`ProcessStageAsync`) fazem rethrow via filtro `when (cancellationToken.IsCancellationRequested)`.
+- O `ProcessStageAsync` checa o token **antes** do `Process`, nos **dois** modos (direto e background) — paridade de comportamento sob cancelamento.
+- Um OCE **interno** (lançado sem o token do chamador cancelado) é tratado como falha comum: `MapError` na fronteira, `OnUnexpected` no `Process`.
+
+Assim, os consumidores tratam o resultado (`Success|Failure`) exaustivamente e deixam o cancelamento fluir para quem cancelou — exatamente como o ASP.NET Core espera num request abortado.
 
 ---
 
@@ -512,11 +533,11 @@ Toda operação é assíncrona e cooperativamente cancelável, alinhada às conv
 
 | Origem | Quem traduz | Como ocorre |
 |---|---|---|
-| Erro de **negócio** deliberado | o próprio `Process` | `return (FeatureError)new AlgumCaso(...)` (lembrar do duplo salto: cast ao union) |
+| Erro de **negócio** deliberado | o próprio `Process` | `return Fail(new AlgumCaso(...))` (recomendado; ou o cast ao union — ver duplo salto §5.2) |
 | Falha de **I/O** (URL fora, timeout) | `RepositoryBase.MapError` (abstrato) | `IDataSource.CallAsync` lança exceção técnica; `MapError` a mapeia num caso do `union` |
 | Exceção **inesperada** (bug) no `Process` | `OnUnexpected(Exception)` (abstrato) | em direto **ou** background, a base captura e mapeia num caso do `union` — nada propaga |
 
-Em todos os casos, o resultado é **um dos casos do `union` da feature** — por isso o consumo final é exaustivo e contempla todas as origens.
+Em todos os casos, o resultado é **um dos casos do `union` da feature** — por isso o consumo final é exaustivo e contempla todas as origens. **Fora da tabela, por não ser falha:** o **cancelamento do chamador** propaga como `OperationCanceledException` (§6.8) — não vira caso do `union`.
 
 ---
 
@@ -527,14 +548,16 @@ Chamador
   │  await usecase.CallAsync(parameters, ct)
   ▼
 [UsecaseBase]                          [UsecaseBaseCallData]
-  Process(parameters)                    FASE 1: await repository.CallAsync(...)
+  Process(parameters, ct)                FASE 1: await repository.CallAsync(...)
    └─ direto ou Task.Run                   │  [RepositoryBase] try dataSource.CallAsync(...)
    └─ exceção inesperada → OnUnexpected     │   ├─ sucesso → Success<TData>(dado bruto)
-                                          │   └─ exceção técnica → MapError → Failure<TError>
+   └─ ct cancelado → OCE propaga            │   ├─ exceção técnica → MapError → Failure<TError>
+                                          │   └─ ct do chamador cancelado → OCE propaga
                                           FASE 2: is Failure? → propaga Failure<TError>
-                                          FASE 3: Process(dado, parameters)
+                                          FASE 3: Process(dado, parameters, ct)
                                             └─ direto ou Task.Run
                                             └─ exceção inesperada → OnUnexpected (caso do TError)
+                                            └─ ct cancelado → OCE propaga (paridade nos 2 modos)
   │
   ▼
 ReturnSuccessOrError<TValue, TError>
@@ -572,10 +595,10 @@ Na versão anterior, `ParametersReturnResult` carregava o `AppError` a usar em c
 Padrão canônico de Clean Architecture (Anti-Corruption Layer): a camada de dados retorna `Result<T>`, nunca expõe a infra ao domínio, e data sources não são acessados diretamente por casos de uso. Mantém o `DataSource` burro (testável como I/O puro), concentra a tradução de erro num único ponto (`MapError`) e, sobretudo, torna o usecase **portável** — ele depende de `IRepository`, então trocar o datasource (HTTP→cache, real→fake) não toca na regra de negócio.
 
 ### 9.7.2 Por que o erro é **parametrizado** (`TError` = `union` fechado por feature)?
-Para que o tratamento final seja **obrigado pelo compilador a contemplar todos os erros** que a feature pode produzir. Se `Failure` carregasse um `AppError` aberto, o `switch` no consumo precisaria de um braço `_` — e seria fácil esquecer um caso. Fechando o conjunto num `union` por feature, o `MapError` (Repository) e o `Process`/`OnUnexpected` (UseCase) só produzem casos previstos, e o `switch`/`Match` é exaustivo. **Custo aceito:** +1 parâmetro de tipo na cadeia (`UsecaseBaseCallData` tem 4); o duplo salto de conversão no `Process` (cast ao union); e a base não fabrica mais erro genérico — por isso `MapError`/`OnUnexpected` são abstratos.
+Para que o tratamento final seja **obrigado pelo compilador a contemplar todos os erros** que a feature pode produzir. Se `Failure` carregasse um `AppError` aberto, o `switch` no consumo precisaria de um braço `_` — e seria fácil esquecer um caso. Fechando o conjunto num `union` por feature, o `MapError` (Repository) e o `Process`/`OnUnexpected` (UseCase) só produzem casos previstos, e o `switch`/`Match` é exaustivo. **Custo aceito:** +1 parâmetro de tipo na cadeia (`UsecaseBaseCallData` tem 4); o duplo salto de conversão no `Process` (mitigado pela factory `Fail`/`Ok`, ou contornável com o cast ao union); e a base não fabrica mais erro genérico — por isso `MapError`/`OnUnexpected` são abstratos.
 
 ### 9.7.3 Por que `OnUnexpected` (e o `Process` nunca propaga)?
-No modelo de erro fechado não existe um erro universal para a base usar quando o `Process` lança uma exceção inesperada (um bug). Em vez de propagar (deixar escapar como `throw`) ou inventar um erro, a base delega ao `OnUnexpected(Exception)` **abstrato**: o consumidor mapeia o inesperado para um caso do seu `union` (tipicamente um `ErrorGeneric`/`Unexpected`). Vale para os **dois** modos (direto e background) — o resultado é sempre um dos casos previstos, e o sistema fica robusto (nada escapa sem ser um valor de erro tratável).
+No modelo de erro fechado não existe um erro universal para a base usar quando o `Process` lança uma exceção inesperada (um bug). Em vez de propagar (deixar escapar como `throw`) ou inventar um erro, a base delega ao `OnUnexpected(Exception)` **abstrato**: o consumidor mapeia o inesperado para um caso do seu `union` (tipicamente um `ErrorGeneric`/`Unexpected`). Vale para os **dois** modos (direto e background) — o resultado é sempre um dos casos previstos, e o sistema fica robusto (nada escapa sem ser um valor de erro tratável). A única exceção que atravessa é o **cancelamento do chamador** (`OperationCanceledException` com o token cancelado) — cancelamento não é erro a tratar, ver §6.8.
 
 ### 9.8 Por que `RunInBackground` é `init` e não parâmetro de método?
 É uma característica da configuração do caso de uso (decidida na composição/DI), não da chamada individual. `init` permite definir na inicialização do objeto e mantém imutável depois.
@@ -583,8 +606,8 @@ No modelo de erro fechado não existe um erro universal para a base usar quando 
 ### 9.9 Por que `Unit` e `Nil` separados?
 `void` não é um tipo de primeira classe em C# (não pode ser argumento genérico). `Unit` resolve isso para operações sem valor. `Nil` distingue "null é o resultado correto e esperado" de "ausência de valor por erro", evitando ambiguidade com `null`.
 
-### 9.10 Por que `Debug.WriteLine` para o monitoramento?
-Removido automaticamente em builds Release (a menos que `DEBUG` esteja definido), garantindo custo zero em produção — análogo a um recurso opt-in. Para observabilidade estruturada em produção, a versão futura preverá injeção opcional de `ILogger<T>`.
+### 9.10 Por que um hook virtual (`OnExecutionTimeMeasured`) para o monitoramento?
+A primeira versão usava `Debug.WriteLine`, mas `[Conditional("DEBUG")]` é avaliado na compilação **da biblioteca** — no binário Release publicado no NuGet a chamada é removida do IL, e `MonitorExecutionTime` viraria letra morta para todo consumidor do pacote (mesmo em build Debug do app dele). A solução é o hook **virtual** `protected virtual void OnExecutionTimeMeasured(TimeSpan elapsed)`: a implementação padrão escreve em `Trace.WriteLine` (o símbolo `TRACE` fica ativo também em Release, então funciona no pacote publicado), e o consumidor sobrescreve o hook para integrar à observabilidade dele (`ILogger`, métricas) — sem a base impor dependência de logging. O hook só é invocado quando `MonitorExecutionTime = true`; desligado, custo zero.
 
 ### 9.11 Por que `ConfigureAwait(false)` em todos os `await` das classes base?
 Por ser uma **biblioteca**, ela não deve capturar nem voltar ao `SynchronizationContext` do chamador (UI/ASP.NET legado). `ConfigureAwait(false)` evita deadlocks em chamadores que bloqueiam (`.Result`/`.Wait()`) e elimina o custo de re-despacho ao contexto original — recomendação canônica para código de biblioteca (analyzer `CA2007`). Como `Process` é síncrono e o I/O roda na fonte de dados, nenhum estado de contexto precisa ser preservado entre as fases.
@@ -617,9 +640,9 @@ Framework: **xUnit v3** + **NSubstitute** (mocking de `IDataSource`/`IRepository
 | Área | Cenários |
 |---|---|
 | `ReturnSuccessOrError<T,E>` | igualdade por valor, `Match`, `switch` nativo, **exaustividade do switch no erro (union, sem `_`)** |
-| `UsecaseBase<T,P,E>` | execução direta, em background, `MonitorExecutionTime`, erro de negócio, exceção inesperada → `OnUnexpected` (direto **e** background), resultado `Unit`/`Nil` |
-| `UsecaseBaseCallData<T,D,P,E>` | sucesso fetch+process, curto-circuito (process não chamado em `Failure` do repo), preservação do **caso concreto** do erro, `OnUnexpected`, paridade direto↔background, `CancellationToken` |
-| `RepositoryBase<D,P,E>` | sucesso (dado→`Success`), exceção→`MapError` (caso do union traduzido), braço default, `CancellationToken` propagado |
+| `UsecaseBase<T,P,E>` | execução direta, em background, `MonitorExecutionTime` (resultado inalterado + hook `OnExecutionTimeMeasured` chamado/não chamado), erro de negócio via `Fail`/`Ok`, exceção inesperada → `OnUnexpected` (direto **e** background), OCE sem token cancelado → `OnUnexpected`, cancelamento (token pré-cancelado e cooperativo no `Process`, direto **e** background → OCE propaga), resultado `Unit`/`Nil` |
+| `UsecaseBaseCallData<T,D,P,E>` | sucesso fetch+process, curto-circuito (process não chamado em `Failure` do repo), preservação do **caso concreto** do erro, `OnUnexpected`, paridade direto↔background, `CancellationToken`, token pré-cancelado → OCE sem chamar `Process` |
+| `RepositoryBase<D,P,E>` | sucesso (dado→`Success`), exceção→`MapError` (caso do union traduzido), braço default, `CancellationToken` propagado, cancelamento do chamador → OCE propaga (sem `MapError`), OCE interno sem token cancelado → `MapError` |
 | `AppError`/`ErrorGeneric` | comparação por valor, `WithMessage` preserva tipo concreto |
 | `Parameters`/`NoParams` | só-dados (igualdade por valor), singleton `NoParams.Value` |
 | `IDataSource<T,P>` | sucesso e exceção (fonte burra) |

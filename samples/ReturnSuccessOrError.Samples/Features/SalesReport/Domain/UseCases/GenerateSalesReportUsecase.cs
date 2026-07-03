@@ -12,16 +12,19 @@ public sealed class GenerateSalesReportUsecase(IRepository<SalesRows, SalesRepor
     : UsecaseBaseCallData<SalesReport, SalesRows, SalesReportParameters, SalesError>(repo)
 {
     protected override ReturnSuccessOrError<SalesReport, SalesError> Process(
-        SalesRows rows, SalesReportParameters p)
+        SalesRows rows, SalesReportParameters p, CancellationToken cancellationToken)
     {
         if (rows.Count == 0)
-            return (SalesError)new EmptyPeriod($"Sem vendas no período (RowCount = {p.RowCount})"); // -> Failure
+            return Fail(new EmptyPeriod($"Sem vendas no período (RowCount = {p.RowCount})")); // -> Failure (factory, sem cast)
 
         decimal revenue = 0;
         var items = 0;
         var byProduct = new Dictionary<string, decimal>();
         foreach (var r in rows)
         {
+            // Cancelamento cooperativo em processamento longo: o token do chamador chega ao Process.
+            cancellationToken.ThrowIfCancellationRequested();
+
             var total = r.Quantity * r.UnitPrice;
             revenue += total;
             items += r.Quantity;
@@ -30,7 +33,7 @@ public sealed class GenerateSalesReportUsecase(IRepository<SalesRows, SalesRepor
 
         var top = byProduct.MaxBy(kv => kv.Value).Key;
 
-        return new SalesReport(items, revenue, revenue / rows.Count, top); // -> Success
+        return Ok(new SalesReport(items, revenue, revenue / rows.Count, top)); // -> Success
     }
 
     protected override SalesError OnUnexpected(Exception exception)

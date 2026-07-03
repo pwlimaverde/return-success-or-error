@@ -15,7 +15,7 @@ public abstract class UsecaseExecutorBase<TValue, TError>
     /// <summary>Se verdadeiro, o processamento (CPU-bound) roda no thread pool (Task.Run).</summary>
     public bool RunInBackground { get; init; }
 
-    /// <summary>Se verdadeiro, mede e registra o tempo de execução.</summary>
+    /// <summary>Se verdadeiro, mede o tempo de execução e o entrega a <see cref="OnExecutionTimeMeasured"/>.</summary>
     public bool MonitorExecutionTime { get; init; }
 
     /// <summary>
@@ -24,8 +24,42 @@ public abstract class UsecaseExecutorBase<TValue, TError>
     /// decide para qual caso de <typeparamref name="TError"/> o inesperado é mapeado (tipicamente
     /// um caso "Unexpected"/<see cref="ErrorGeneric"/>). Garante que o <c>Process</c> nunca lança
     /// ao chamador — o resultado é sempre um dos casos previstos.
+    /// <para>
+    /// <b>Exceção do contrato — cancelamento:</b> um <see cref="OperationCanceledException"/>
+    /// causado pelo <b>token do chamador</b> não passa por aqui: cancelamento não é falha de
+    /// domínio e propaga como exceção, no idioma do .NET.
+    /// </para>
     /// </summary>
     protected abstract TError OnUnexpected(Exception exception);
+
+    /// <summary>
+    /// Recebe o tempo medido quando <see cref="MonitorExecutionTime"/> está habilitado.
+    /// <b>Virtual</b>: sobrescreva para integrar à sua observabilidade (ex.: <c>ILogger</c>) —
+    /// a base não impõe dependência de logging. A implementação padrão escreve em
+    /// <see cref="Trace"/> (ativa também no binário Release do pacote; <c>Debug.WriteLine</c>
+    /// seria removido na compilação da biblioteca e nunca chegaria ao consumidor do NuGet).
+    /// </summary>
+    /// <param name="elapsed">Duração total da execução do caso de uso.</param>
+    protected virtual void OnExecutionTimeMeasured(TimeSpan elapsed) =>
+        Trace.WriteLine($"[ReturnSuccessOrError] Execution Time {GetType().Name} " +
+                        $"({(RunInBackground ? "Background" : "Direct")}): {elapsed.TotalMilliseconds:F2}ms");
+
+    /// <summary>
+    /// Cria um resultado de <b>falha</b> a partir de um caso concreto do <c>union</c> de erro,
+    /// <b>sem o cast do "duplo salto"</b>. Como o parâmetro já é <typeparamref name="TError"/>
+    /// (fixado por esta base, não inferido), passar um caso concreto exige uma única conversão de
+    /// <c>union</c> — no contexto do argumento — em vez das duas conversões implícitas encadeadas
+    /// que o C# proíbe (caso → <c>union</c> de erro → <c>Failure</c>). É a forma <b>recomendada</b>
+    /// de retornar um erro de negócio no <c>Process</c>. Ver PRD §5.2.
+    /// </summary>
+    protected static ReturnSuccessOrError<TValue, TError> Fail(TError error) => new Failure<TError>(error);
+
+    /// <summary>
+    /// Cria um resultado de <b>sucesso</b> a partir do valor. Conveniência <b>opcional</b> e
+    /// simétrica a <see cref="Fail"/>: o caminho feliz nunca sofre do "duplo salto" (<typeparamref name="TValue"/>
+    /// é o tipo concreto direto), então <c>return value;</c> continua igualmente idiomático.
+    /// </summary>
+    protected static ReturnSuccessOrError<TValue, TError> Ok(TValue value) => new Success<TValue>(value);
 
     /// <summary>Envolve a execução com a medição de tempo, quando habilitada (sem alocação).</summary>
     private protected async Task<ReturnSuccessOrError<TValue, TError>> MeasuredAsync(
@@ -36,7 +70,7 @@ public abstract class UsecaseExecutorBase<TValue, TError>
 
         var startTimestamp = Stopwatch.GetTimestamp();
         var result = await run().ConfigureAwait(false);
-        LogTime(GetType().Name, Stopwatch.GetElapsedTime(startTimestamp), RunInBackground);
+        OnExecutionTimeMeasured(Stopwatch.GetElapsedTime(startTimestamp));
         return result;
     }
 
@@ -44,15 +78,24 @@ public abstract class UsecaseExecutorBase<TValue, TError>
     /// Executa o <paramref name="process"/> direto na thread chamadora ou, se
     /// <see cref="RunInBackground"/>, no thread pool. Em <b>ambos</b> os modos, uma exceção
     /// inesperada é convertida via <see cref="OnUnexpected"/> em <see cref="Failure{TError}"/> —
-    /// o <c>Process</c> nunca propaga exceção ao chamador.
+    /// o <c>Process</c> nunca propaga exceção ao chamador. Única exceção: o <b>cancelamento do
+    /// chamador</b> (token cancelado) propaga como <see cref="OperationCanceledException"/> em
+    /// ambos os modos — cancelamento não é falha de domínio.
     /// </summary>
     private protected Task<ReturnSuccessOrError<TValue, TError>> ProcessStageAsync(
         Func<ReturnSuccessOrError<TValue, TError>> process,
         CancellationToken cancellationToken)
     {
+        // Paridade direto↔background: token já cancelado interrompe ANTES do Process, nos dois modos.
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (!RunInBackground)
         {
             try { return Task.FromResult(process()); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw; // cancelamento cooperativo do chamador — não é um "inesperado"
+            }
             catch (Exception ex)
             {
                 return Task.FromResult<ReturnSuccessOrError<TValue, TError>>(OnUnexpected(ex));
@@ -64,11 +107,11 @@ public abstract class UsecaseExecutorBase<TValue, TError>
         return Task.Run<ReturnSuccessOrError<TValue, TError>>(() =>
         {
             try { return process(); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw; // cancelamento cooperativo do chamador — não é um "inesperado"
+            }
             catch (Exception ex) { return OnUnexpected(ex); }
         }, cancellationToken);
     }
-
-    private static void LogTime(string name, TimeSpan elapsed, bool background) =>
-        Debug.WriteLine($"[ReturnSuccessOrError] Execution Time {name} " +
-                        $"({(background ? "Background" : "Direct")}): {elapsed.TotalMilliseconds:F2}ms");
 }

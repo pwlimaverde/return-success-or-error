@@ -23,10 +23,15 @@ public abstract class UsecaseBaseCallData<TValue, TData, TParams, TError> : Usec
     protected UsecaseBaseCallData(IRepository<TData, TParams, TError> repository) =>
         _repository = repository;
 
-    /// <summary>Regra de negócio: recebe o dado bruto já carregado e os parâmetros.</summary>
+    /// <summary>
+    /// Regra de negócio: recebe o dado bruto já carregado, os parâmetros e o token do chamador
+    /// para cancelamento cooperativo em processamento longo (cheque-o em pontos convenientes via
+    /// <c>ThrowIfCancellationRequested()</c>; ignorá-lo é válido em regras curtas).
+    /// </summary>
     protected abstract ReturnSuccessOrError<TValue, TError> Process(
         TData data,
-        TParams parameters);
+        TParams parameters,
+        CancellationToken cancellationToken);
 
     /// <summary>Executa o caso de uso (fetch → curto-circuito → process), com medição opcional.</summary>
     public Task<ReturnSuccessOrError<TValue, TError>> CallAsync(
@@ -48,7 +53,7 @@ public abstract class UsecaseBaseCallData<TValue, TData, TParams, TError> : Usec
         {
             Failure<TError> failure => failure,
             Success<TData> success =>
-                await ProcessStageAsync(() => Process(success.Value, parameters), cancellationToken)
+                await ProcessStageAsync(() => Process(success.Value, parameters, cancellationToken), cancellationToken)
                     .ConfigureAwait(false),
         };
     }

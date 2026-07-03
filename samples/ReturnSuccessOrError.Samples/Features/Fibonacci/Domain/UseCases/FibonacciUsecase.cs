@@ -6,11 +6,12 @@ namespace ReturnSuccessOrError.Samples.Features.Fibonacci;
 /// </summary>
 public sealed class FibonacciUsecase : UsecaseBase<long, FibonacciParameters, FibonacciError>
 {
-    protected override ReturnSuccessOrError<long, FibonacciError> Process(FibonacciParameters p)
+    protected override ReturnSuccessOrError<long, FibonacciError> Process(
+        FibonacciParameters p, CancellationToken cancellationToken)
     {
         if (p.N < 0)
-            return (FibonacciError)new NegativeInput($"N deve ser >= 0 (N = {p.N})"); // -> Failure
-        return Fib(p.N);                                                                // long -> Success
+            return Fail(new NegativeInput($"N deve ser >= 0 (N = {p.N})")); // -> Failure (factory, sem cast)
+        return Ok(Fib(p.N));                                                 // long -> Success
     }
 
     protected override FibonacciError OnUnexpected(Exception exception)

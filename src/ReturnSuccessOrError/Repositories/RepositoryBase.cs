@@ -27,7 +27,8 @@ public abstract class RepositoryBase<TData, TParams, TError> : IRepository<TData
     /// <summary>
     /// Chama a fonte e devolve o resultado já tratado. A exceção técnica eventualmente lançada
     /// pela fonte é capturada e traduzida por <see cref="MapError"/> — a fronteira nunca propaga
-    /// exceção de infraestrutura ao domínio.
+    /// exceção de infraestrutura ao domínio. O <b>cancelamento do chamador</b> (token cancelado)
+    /// é a única exceção que propaga, como <see cref="OperationCanceledException"/>.
     /// </summary>
     public async Task<ReturnSuccessOrError<TData, TError>> CallAsync(
         TParams parameters,
@@ -37,6 +38,12 @@ public abstract class RepositoryBase<TData, TParams, TError> : IRepository<TData
         {
             // TData -> Success (conversão implícita)
             return await _dataSource.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancelamento do CHAMADOR não é falha de domínio: propaga como OCE (idioma .NET).
+            // Um OCE interno da fonte (sem o token do chamador cancelado) segue para o MapError.
+            throw;
         }
         catch (Exception exception)
         {

@@ -13,10 +13,11 @@ public class UsecaseBaseCallDataTests
     private sealed class StringUsecase(IRepository<int, TestParams, TestError> repo, Action? onProcess = null)
         : UsecaseBaseCallData<string, int, TestParams, TestError>(repo)
     {
-        protected override ReturnSuccessOrError<string, TestError> Process(int data, TestParams p)
+        protected override ReturnSuccessOrError<string, TestError> Process(
+            int data, TestParams p, CancellationToken cancellationToken)
         {
             onProcess?.Invoke();
-            return $"valor: {data}";
+            return $"valor: {data}"; // string -> Success (conversão implícita — segue válida)
         }
 
         protected override TestError OnUnexpected(Exception exception)
@@ -26,7 +27,8 @@ public class UsecaseBaseCallDataTests
     private sealed class ThrowingProcessUsecase(IRepository<int, TestParams, TestError> repo)
         : UsecaseBaseCallData<string, int, TestParams, TestError>(repo)
     {
-        protected override ReturnSuccessOrError<string, TestError> Process(int data, TestParams p)
+        protected override ReturnSuccessOrError<string, TestError> Process(
+            int data, TestParams p, CancellationToken cancellationToken)
             => throw new InvalidOperationException("process-boom");
 
         protected override TestError OnUnexpected(Exception exception)
@@ -141,5 +143,19 @@ public class UsecaseBaseCallDataTests
         await usecase.CallAsync(new TestParams(), cts.Token);
 
         await repo.Received(1).CallAsync(Arg.Any<TestParams>(), cts.Token);
+    }
+
+    [Fact]
+    public async Task CallAsync_TokenJaCancelado_LancaOCE_SemChamarProcess()
+    {
+        // Cancelamento não é falha de domínio: propaga como OCE antes do Process, nos dois modos.
+        var processChamado = false;
+        var usecase = new StringUsecase(RepoReturning(1), () => processChamado = true);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => usecase.CallAsync(new TestParams(), cts.Token));
+        processChamado.ShouldBeFalse();
     }
 }

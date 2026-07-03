@@ -32,7 +32,7 @@ A `ReturnSuccessOrError` resolve esses problemas estruturando o fluxo de execuç
 - **Separação de Threads Inteligente**: A busca de dados (I/O) sempre ocorre de forma assíncrona tradicional. Contudo, o processamento de regras de negócio (CPU-bound) pode ser opcionalmente delegado ao pool de threads do .NET em segundo plano (`Task.Run`) com uma simples flag (`RunInBackground = true`), mantendo a infraestrutura de I/O intacta na thread original.
 - **Erro fechado por feature (`union`)**: na construção da feature você define o conjunto de erros que ela pode produzir (um `union`). `MapError` (no Repository) traduz exceções técnicas nesses casos; `OnUnexpected` mapeia o bug inesperado; o `Process` devolve erros de negócio. `AppError` é uma base opcional dos records de erro (dá `Message`/`WithMessage`).
 - **Nada propaga como exceção**: uma exceção inesperada no `Process` (direto ou background) é convertida via `OnUnexpected` num caso do `union` — o resultado é sempre um erro tratável, nunca um `throw` que escapa.
-- **Cancelamento Cooperativo (`CancellationToken`)**: Todo o fluxo — busca de dados e processamento — propaga `CancellationToken` de ponta a ponta, integrando-se nativamente com o modelo de cancelamento do ASP.NET Core e da BCL.
+- **Cancelamento Cooperativo (`CancellationToken`)**: o token do chamador percorre todo o fluxo — `CallAsync` → `Repository` → `DataSource` **e o próprio `Process`** (último parâmetro), permitindo cancelar até o processamento CPU-bound longo. **Cancelamento não é falha de domínio**: quando o token do chamador é cancelado, o `OperationCanceledException` **propaga** (não vira `Failure`), integrando-se nativamente ao modelo do ASP.NET Core e da BCL.
 
 ---
 
@@ -52,7 +52,7 @@ Ou via `PackageReference` no `.csproj`:
 
 ---
 
-## ⚡ Início Rápido (em 4 passos)
+## ⚡ Início Rápido (em 5 passos)
 
 Um caso de uso completo: busca um número na fonte de dados e responde se ele é **maior que 10**. As peças são **Erros (union) → Parameters → DataSource → Repository → UseCase**. Você escreve **a definição dos erros, a tradução (`MapError`/`OnUnexpected`) e a regra (`Process`)** — sem `try/catch` no domínio, sem `Ok(...)`/`Err(...)`.
 
@@ -89,7 +89,8 @@ public sealed class NumeroRepository(IDataSource<int, NumeroParams> ds)
 public sealed class MaiorQue10Usecase(IRepository<int, NumeroParams, NumeroError> repo)
     : UsecaseBaseCallData<bool, int, NumeroParams, NumeroError>(repo)
 {
-    protected override ReturnSuccessOrError<bool, NumeroError> Process(int data, NumeroParams p)
+    protected override ReturnSuccessOrError<bool, NumeroError> Process(
+        int data, NumeroParams p, CancellationToken ct)
         => data > 10; // ← o bool vira Success<bool> sozinho (conversão implícita)
 
     protected override NumeroError OnUnexpected(Exception ex)
@@ -116,12 +117,13 @@ string texto = resultado.Match(
 
 **O que aconteceu por baixo:** a fonte devolveu `42` → o repositório empacotou em `Success<int>(42)` → o `Process` recebeu `42` → `42 > 10` → `Success<bool>(true)`. Se a fonte lançasse uma exceção, o `Repository.MapError` a traduziria num caso do `union`, o `Process` **nem seria chamado**, e o `Match` cairia em `onError`.
 
-> Quer que "não ser maior que 10" seja um **erro de negócio**? Troque o corpo do `Process` por (note o cast ao union — duplo salto):
+> Quer que "não ser maior que 10" seja um **erro de negócio**? Troque o corpo do `Process` por (use a factory `Fail`/`Ok` da base — evita o cast do "duplo salto"):
 > ```csharp
 > if (data <= 10)
->     return (NumeroError)new NaoEhMaior("número não é maior que 10"); // -> Failure
-> return true;                                                         // -> Success
+>     return Fail(new NaoEhMaior("número não é maior que 10")); // -> Failure
+> return Ok(true);                                              // -> Success
 > ```
+> O cast ao union (`return (NumeroError)new NaoEhMaior(...);`) é uma alternativa equivalente — ver "duplo salto" mais abaixo.
 
 ---
 
@@ -143,7 +145,8 @@ A biblioteca é estruturada em torno de tipos simples com responsabilidades úni
 | `IRepository<TData, TParams, TError>` / `RepositoryBase` | **Fronteira** (anti-corruption layer): chama o datasource e traduz a exceção técnica num caso do `union` via `MapError` (**abstrato**). Devolve `ReturnSuccessOrError<TData, TError>`. |
 | `UsecaseBase<TValue, TParams, TError>` | Classe base para casos de uso com lógica pura de negócio, sem consultas externas. |
 | `UsecaseBaseCallData<TValue, TData, TParams, TError>` | Classe base que orquestra busca via `IRepository<TData, TParams, TError>`, curto-circuito e processamento. **Depende da abstração → usecase portável.** |
-| `OnUnexpected(Exception)` | Método abstrato dos casos de uso: mapeia uma exceção inesperada do `Process` (bug) num caso do `union`. O `Process` nunca propaga. |
+| `OnUnexpected(Exception)` | Método abstrato dos casos de uso: mapeia uma exceção inesperada do `Process` (bug) num caso do `union`. O `Process` nunca propaga bug — só o cancelamento do chamador flui como `OperationCanceledException`. |
+| `OnExecutionTimeMeasured(TimeSpan)` | Hook **virtual** de observabilidade: recebe o tempo medido quando `MonitorExecutionTime = true`. Padrão: `Trace.WriteLine`; sobrescreva para plugar seu `ILogger`/métricas. |
 | `Unit` | Singleton que substitui o `void` como argumento genérico em operações sem valor de retorno. |
 | `Nil` | Singleton que representa semanticamente um retorno nulo/vazio válido e bem-sucedido. |
 
@@ -224,15 +227,17 @@ Chamador (Controller/Handler)
   ├── FASE 1 (Fetch): await repository.CallAsync(...) — já tratado.
   │     │  [RepositoryBase]  try dataSource.CallAsync(...)  (I/O, fonte burra)
   │     │     ├── Sucesso ➔ Success<TData>(dado bruto).
-  │     │     └── Exceção técnica ➔ MapError (abstrato) ➔ Failure (caso do union).
+  │     │     ├── Exceção técnica ➔ MapError (abstrato) ➔ Failure (caso do union).
+  │     │     └── Cancelamento do chamador ➔ OperationCanceledException propaga (não é falha).
   │     └── Resultado: Success|Failure (o domínio nunca vê exceção de infra).
   │
   ├── FASE 2 (Curto-Circuito): Se a busca falhou, o fluxo é interrompido.
   │     └── O erro retorna diretamente para o chamador (Process é ignorado).
   │
-  └── FASE 3 (Process): Executa a regra de negócio (CPU-bound) com o dado bruto carregado.
+  └── FASE 3 (Process): Executa a regra de negócio (CPU-bound) com o dado bruto + o token.
         ├── Direto (padrão) ou no Thread Pool (Task.Run) via RunInBackground = true.
-        └── Exceção inesperada (direto OU background) ➔ OnUnexpected ➔ caso do union (nada propaga).
+        ├── Exceção inesperada (direto OU background) ➔ OnUnexpected ➔ caso do union (nada propaga).
+        └── Token do chamador cancelado ➔ OperationCanceledException propaga (paridade nos 2 modos).
   │
   ▼
 ReturnSuccessOrError<TValue, TError>
@@ -324,20 +329,22 @@ public class GerarRelatorioUseCase
         IRepository<List<VendaCrua>, GerarRelatorioParameters, RelatorioError> repository) : base(repository)
     {
         RunInBackground = true;       // O processamento pesado roda no Thread Pool!
-        MonitorExecutionTime = true;  // Habilita medição automática de tempo no Debug
+        MonitorExecutionTime = true;  // Entrega o tempo medido ao hook OnExecutionTimeMeasured
     }
 
     protected override ReturnSuccessOrError<RelatorioVendasResult, RelatorioError> Process(
         List<VendaCrua> data,
-        GerarRelatorioParameters parameters)
+        GerarRelatorioParameters parameters,
+        CancellationToken cancellationToken)
     {
         if (data.Count == 0)
         {
-            // Erro de NEGÓCIO -> Failure (cast ao union — duplo salto)
-            return (RelatorioError)new SemVendas("Nenhuma venda registrada no período selecionado.");
+            // Erro de NEGÓCIO -> Failure (factory Fail — evita o cast do "duplo salto")
+            return Fail(new SemVendas("Nenhuma venda registrada no período selecionado."));
         }
 
-        // Regra de negócio: Consolidação pesada de dados (CPU-bound)
+        // Regra de negócio: Consolidação pesada de dados (CPU-bound). Em loops longos,
+        // coopere com o cancelamento: cancellationToken.ThrowIfCancellationRequested();
         var totalFaturado = data.Sum(v => v.Quantidade * v.PrecoUnitario);
         var totalItens = data.Sum(v => v.Quantidade);
 
@@ -358,10 +365,11 @@ Para regras de negócio que não dependem de fontes de dados externas (sem datas
 // ComissaoError = union(ValorInvalido, ErrorGeneric)
 public class CalcularComissaoUseCase : UsecaseBase<decimal, ComissaoParameters, ComissaoError>
 {
-    protected override ReturnSuccessOrError<decimal, ComissaoError> Process(ComissaoParameters parameters)
+    protected override ReturnSuccessOrError<decimal, ComissaoError> Process(
+        ComissaoParameters parameters, CancellationToken cancellationToken)
     {
         if (parameters.ValorVenda <= 0)
-            return (ComissaoError)new ValorInvalido("O valor da venda deve ser positivo."); // -> Failure
+            return Fail(new ValorInvalido("O valor da venda deve ser positivo.")); // -> Failure (factory)
 
         var comissao = parameters.ValorVenda * 0.05m; // 5% de comissão
         return comissao;                              // decimal -> Success (conversão implícita)
@@ -498,33 +506,43 @@ public sealed class LogoutRepository(ILogoutDataSource ds)
 
 #### 8.4 Casos de Uso (Lógica de Negócio — dependem de IRepository)
 
+Quando a feature tem vários casos de uso, o `OnUnexpected` tende a ser idêntico em todos. **Dica:** centralize-o numa base intermediária **da feature** (escrita uma vez, no seu app) — cada usecase volta a implementar só o `Process`:
+
 ```csharp
-// Features/Auth/Domain/UseCases/LoginUseCase.cs
-public class LoginUseCase : UsecaseBaseCallData<Session, Session, LoginParameters, AuthError>
+// Features/Auth/Domain/UseCases/AuthUsecaseBase.cs — base da FEATURE (centraliza o OnUnexpected)
+public abstract class AuthUsecaseBase<TValue, TData, TParams>(IRepository<TData, TParams, AuthError> repository)
+    : UsecaseBaseCallData<TValue, TData, TParams, AuthError>(repository)
+    where TParams : Parameters
 {
-    public LoginUseCase(IRepository<Session, LoginParameters, AuthError> repository) : base(repository) { }
+    protected override AuthError OnUnexpected(Exception ex) => new ErrorGeneric(ex.Message);
+}
 
-    protected override ReturnSuccessOrError<Session, AuthError> Process(Session data, LoginParameters p)
+// Features/Auth/Domain/UseCases/LoginUseCase.cs — só a regra de negócio
+public class LoginUseCase(IRepository<Session, LoginParameters, AuthError> repository)
+    : AuthUsecaseBase<Session, Session, LoginParameters>(repository)
+{
+    protected override ReturnSuccessOrError<Session, AuthError> Process(
+        Session data, LoginParameters p, CancellationToken ct)
         => data;  // Session -> Success (conversão implícita)
-
-    protected override AuthError OnUnexpected(Exception ex) => new ErrorGeneric(ex.Message);
 }
 
-// RefreshTokenUseCase e LogoutUseCase seguem o mesmo molde (TError = AuthError + OnUnexpected).
-public class RefreshTokenUseCase : UsecaseBaseCallData<Session, Session, RefreshParameters, AuthError>
+// RefreshTokenUseCase e LogoutUseCase seguem o mesmo molde.
+public class RefreshTokenUseCase(IRepository<Session, RefreshParameters, AuthError> repository)
+    : AuthUsecaseBase<Session, Session, RefreshParameters>(repository)
 {
-    public RefreshTokenUseCase(IRepository<Session, RefreshParameters, AuthError> repository) : base(repository) { }
-    protected override ReturnSuccessOrError<Session, AuthError> Process(Session data, RefreshParameters p) => data;
-    protected override AuthError OnUnexpected(Exception ex) => new ErrorGeneric(ex.Message);
+    protected override ReturnSuccessOrError<Session, AuthError> Process(
+        Session data, RefreshParameters p, CancellationToken ct) => data;
 }
 
-public class LogoutUseCase : UsecaseBaseCallData<Unit, Unit, LogoutParameters, AuthError>
+public class LogoutUseCase(IRepository<Unit, LogoutParameters, AuthError> repository)
+    : AuthUsecaseBase<Unit, Unit, LogoutParameters>(repository)
 {
-    public LogoutUseCase(IRepository<Unit, LogoutParameters, AuthError> repository) : base(repository) { }
-    protected override ReturnSuccessOrError<Unit, AuthError> Process(Unit data, LogoutParameters p) => Unit.Value;
-    protected override AuthError OnUnexpected(Exception ex) => new ErrorGeneric(ex.Message);
+    protected override ReturnSuccessOrError<Unit, AuthError> Process(
+        Unit data, LogoutParameters p, CancellationToken ct) => Unit.Value;
 }
 ```
+
+> A base intermediária é opcional — em features com um único usecase, implemente `OnUnexpected` direto nele.
 
 #### 8.5 Service Layer — Contrato e Implementação (Orquestrador)
 
@@ -682,9 +700,11 @@ Todas as origens de falha caem num **caso do `union` da feature** — por isso o
 
 | Origem da Falha | Quem traduz | Como ocorre |
 | :--- | :--- | :--- |
-| Regra de **negócio** deliberada | o próprio `Process` | `return (FeatureError)new AlgumCaso(...)` (cast ao union — duplo salto) |
+| Regra de **negócio** deliberada | o próprio `Process` | `return Fail(new AlgumCaso(...))` (recomendado; ou o cast ao union — duplo salto) |
 | Falha de **I/O** (banco, HTTP, timeout) | `RepositoryBase.MapError` (abstrato) | `IDataSource.CallAsync` lança exceção técnica; `MapError` a mapeia num caso do `union` |
 | Exceção **inesperada** (bug) no `Process` | `OnUnexpected(Exception)` (abstrato) | em direto **ou** background, a base captura e mapeia num caso do `union` — nada propaga |
+
+**Fora da tabela, por não ser falha:** o **cancelamento do chamador** (token cancelado) propaga como `OperationCanceledException` — não vira caso do `union`. É a "terceira via" idiomática do .NET: quem cancelou não quer um erro de negócio, quer abortar.
 
 Não há códigos de rastreio embutidos: o consumidor escolhe o caso de erro em cada ponto. O `union` fechado garante que, se uma nova origem precisar de um novo caso, o compilador force a atualização de todos os `switch` de consumo.
 
@@ -700,8 +720,8 @@ Não há códigos de rastreio embutidos: o consumidor escolhe o caso de erro em 
 - **Composição e Modularização:** O método de extensão por feature (`AddXxxFeature()`) + agregador fino (que você implementa na sua camada de composição, fora do core) faz cada funcionalidade encapsular suas dependências internas (usecases, datasources) e expor uma interface de serviço limpa. Registro desacoplado, modular e extensível, no idioma do .NET — no container de DI que você já usa.
 - **Zero Dependências de Runtime:** O core não carrega nenhum pacote de runtime (apenas a BCL `System.*`), permanecendo agnóstico do seu gerenciador de DI e sem impor frameworks de terceiros. Máxima interoperabilidade e zero conflito de versões.
 - **AOT-Friendly & Leve:** Construído sobre recursos modernos de C# (`record`, `pattern matching`, generic constraints) sem reflexão em tempo de execução. Totalmente compatível com Native AOT e trimming.
-- **Cancelamento Cooperativo:** `CancellationToken` propagado de ponta a ponta, integrando-se nativamente com ASP.NET Core e a BCL.
-- **Observabilidade Opt-in:** Medição de tempo de execução habilitável por instância (`MonitorExecutionTime`), com custo zero quando desligada.
+- **Cancelamento Cooperativo:** `CancellationToken` propagado de ponta a ponta — inclusive ao `Process` (CPU-bound). Cancelamento do chamador propaga como `OperationCanceledException` (não vira `Failure`), integrando-se nativamente com ASP.NET Core e a BCL.
+- **Observabilidade Opt-in:** Medição de tempo de execução habilitável por instância (`MonitorExecutionTime`), com custo zero quando desligada. O hook virtual `OnExecutionTimeMeasured(TimeSpan)` permite plugar `ILogger`/métricas sem a biblioteca impor dependência de logging.
 
 ---
 

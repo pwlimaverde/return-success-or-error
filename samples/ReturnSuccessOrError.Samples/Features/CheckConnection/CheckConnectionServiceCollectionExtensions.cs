@@ -9,9 +9,9 @@ public static class CheckConnectionServiceCollectionExtensions
 {
     public static IServiceCollection AddCheckConnectionFeature(this IServiceCollection services)
         => services
-            .AddSingleton<IDataSource<bool, CheckConnectionParameters>>(
+            .AddSingleton<IDataSource<bool, NoParams>>(
                 _ => new FakeConnectivityDataSource(online: true))
-            .AddSingleton<IRepository<bool, CheckConnectionParameters, CheckConnectionError>,
+            .AddSingleton<IRepository<bool, NoParams, CheckConnectionError>,
                 CheckConnectionRepository>()
             .AddSingleton<CheckConnectionUsecase>()
             .AddSingleton<ICheckConnectionService, CheckConnectionService>();
