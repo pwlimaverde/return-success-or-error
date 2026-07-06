@@ -18,6 +18,6 @@ jobs:
           dotnet-quality: 'preview'   # .NET 11/C# 15 ainda em preview
           cache: true
           cache-dependency-path: '**/packages.lock.json'
-      - run: dotnet restore
+      - run: dotnet restore --locked-mode
       - run: dotnet build --configuration Release --no-restore
       - run: dotnet test --configuration Release --no-build --collect:"XPlat Code Coverage"

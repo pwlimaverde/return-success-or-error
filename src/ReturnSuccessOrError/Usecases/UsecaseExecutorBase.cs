@@ -68,8 +68,8 @@ public abstract class UsecaseExecutorBase<TValue, TError>
         if (!MonitorExecutionTime)
             return await run().ConfigureAwait(false);
 
-        var startTimestamp = Stopwatch.GetTimestamp();
-        var result = await run().ConfigureAwait(false);
+        long startTimestamp = Stopwatch.GetTimestamp();
+        ReturnSuccessOrError<TValue, TError> result = await run().ConfigureAwait(false);
         OnExecutionTimeMeasured(Stopwatch.GetElapsedTime(startTimestamp));
         return result;
     }

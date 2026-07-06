@@ -44,7 +44,7 @@ public abstract class UsecaseBaseCallData<TValue, TData, TParams, TError> : Usec
         CancellationToken cancellationToken)
     {
         // FASE 1 — FETCH: o repositório já devolve Success|Failure (a fronteira tratou a exceção).
-        var fetchResult = await _repository.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
+        ReturnSuccessOrError<TData, TError> fetchResult = await _repository.CallAsync(parameters, cancellationToken).ConfigureAwait(false);
 
         // FASE 2 — CURTO-CIRCUITO: Failure<TError> flui entre genéricos (depende só de TError);
         //          o Success é desconstruído por pattern matching.

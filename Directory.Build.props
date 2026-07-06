@@ -10,5 +10,7 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <!-- Build reproduzível + cache de CI: fixa as versões resolvidas em packages.lock.json. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Tags de release usam prefixo 'v' (v1.0.0-preview.1); sem isto o MinVer ignoraria a tag. -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>
 </Project>

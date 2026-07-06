@@ -5,12 +5,13 @@ Todas as mudanças notáveis deste projeto são documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
-## [1.0.0] - Não lançado
+## [1.0.0-preview.1] - 2026-07-05
 
-Primeira versão (em .NET 11 / C# 15, ainda em _preview_). Biblioteca de domínio para Clean
-Architecture, estruturada em **três camadas** (`DataSource → Repository → UseCase`), com result
-type discriminado de **erro fechado por feature** e bases de caso de uso. Zero dependências de
-runtime; AOT-friendly. A publicação estável aguarda o GA do .NET 11 (nov/2026).
+Primeiro lançamento **pré-release** no NuGet (em .NET 11 / C# 15, ainda em _preview_). Biblioteca
+de domínio para Clean Architecture, estruturada em **três camadas** (`DataSource → Repository →
+UseCase`), com result type discriminado de **erro fechado por feature** e bases de caso de uso.
+Zero dependências de runtime; AOT-friendly. Publicado como pré-release porque o alvo (`net11.0`) é
+um framework _preview_; a versão **estável `1.0.0` aguarda o GA do .NET 11 (nov/2026)**.
 
 ### Adicionado
 
@@ -90,4 +91,4 @@ runtime; AOT-friendly. A publicação estável aguarda o GA do .NET 11 (nov/2026
   camada `Repository` (anti-corruption) → **erro parametrizado por feature** (`TError` = `union`,
   consumo exaustivo). Como a 1.0.0 não foi publicada, estas mudanças não quebram consumidores.
 
-[1.0.0]: https://github.com/pwlimaverde/return-success-or-error/releases/tag/v1.0.0
+[1.0.0-preview.1]: https://github.com/pwlimaverde/return-success-or-error/releases/tag/v1.0.0-preview.1

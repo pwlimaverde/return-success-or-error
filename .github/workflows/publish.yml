@@ -4,6 +4,10 @@ on:
   push:
     tags: [ 'v*' ]
 
+permissions:
+  id-token: write            # OIDC para Trusted Publishing no NuGet (sem API key de longa duração)
+  contents: write            # necessário para criar o GitHub Release
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -17,16 +21,34 @@ jobs:
           dotnet-quality: 'preview'   # .NET 11/C# 15 ainda em preview
           cache: true
           cache-dependency-path: '**/packages.lock.json'
-      - run: dotnet restore
+      - run: dotnet restore --locked-mode
       - run: dotnet test --configuration Release
       - name: Pack
         run: >
           dotnet pack src/ReturnSuccessOrError/ReturnSuccessOrError.csproj
-          --configuration Release --output ./artifacts
+          --configuration Release --no-restore --output ./artifacts
           -p:ContinuousIntegrationBuild=true
+      - name: NuGet login (OIDC -> chave temporária via Trusted Publishing)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: Pwlimaverde
       - name: Push to NuGet.org
         run: >
-          dotnet nuget push ./artifacts/*.nupkg
+          dotnet nuget push "./artifacts/*.nupkg"
           --source https://api.nuget.org/v3/index.json
-          --api-key ${{ secrets.NUGET_API_KEY }}
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
           --skip-duplicate
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          FLAGS=()
+          # Tag com hífen (ex.: v1.0.0-preview.1) => marca como pré-release.
+          if [[ "$TAG" == *-* ]]; then FLAGS+=(--prerelease); fi
+          gh release create "$TAG" \
+            ./artifacts/*.nupkg ./artifacts/*.snupkg \
+            --title "$TAG" \
+            --notes "Publicado no NuGet. Veja o CHANGELOG.md para detalhes." \
+            "${FLAGS[@]}"
