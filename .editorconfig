@@ -105,6 +105,12 @@ dotnet_diagnostic.IDE0072.severity = none
 dotnet_diagnostic.CS8655.severity = none
 # Operador de conversão usa corpo de expressão, alinhado ao estilo do projeto (IDE0023).
 dotnet_diagnostic.IDE0023.severity = none
+# API pública PLANA: todos os tipos vivem no namespace raiz 'ReturnSuccessOrError' (um único
+# 'using' para o consumidor); as subpastas (Core/Errors/Usecases/...) organizam o código por
+# preocupação, não o namespace. Decisão de design (PRD §5). Nota: no Windows a regra não dispara
+# (o '#' em 'C:\PROJETOS\C#\...' invalida o cálculo do namespace pela pasta), mas no CI Linux sim.
+dotnet_style_namespace_match_folder = false
+dotnet_diagnostic.IDE0130.severity = none
 
 # ---- Projeto de testes: relaxar regras inadequadas a código de teste ----
 [tests/**.cs]
@@ -132,6 +138,10 @@ dotnet_diagnostic.CA1515.severity = none
 dotnet_diagnostic.CA1815.severity = none
 # Alinhamento dos braços de switch nos testes é estilo intencional de legibilidade.
 dotnet_diagnostic.IDE0055.severity = none
+# ParametersTests usa o namespace '...Tests.ParametersDomain' (não '...Tests.Parameters'): um
+# segmento 'Parameters' sombrearia o tipo 'ReturnSuccessOrError.Parameters' (ver CLAUDE.md).
+dotnet_style_namespace_match_folder = false
+dotnet_diagnostic.IDE0130.severity = none
 
 # ---- Projeto de samples: app de demonstração, não código de biblioteca ----
 [samples/**.cs]
